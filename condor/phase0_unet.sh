@@ -33,26 +33,57 @@ export OPENBLAS_NUM_THREADS=1
 #   PHASE0_EPOCHS=100
 #   PHASE0_CONDITIONS=A,C,G
 #   PHASE0_SUFFIX=""
+#   PHASE0_MODE=full       # full (default) | sanity | sanity_then_full
 EPOCHS="${PHASE0_EPOCHS:-100}"
 CONDITIONS="${PHASE0_CONDITIONS:-A,C,G}"
 SUFFIX="${PHASE0_SUFFIX:-}"
 WANDB_PROJECT="${WANDB_PROJECT:-uwf-phase0}"
 WANDB_TAGS="${WANDB_TAGS:-phase0,gpu}"
+MODE="${PHASE0_MODE:-full}"
 
 EXTRA_ARGS=()
 if [[ -n "${WANDB_ENTITY:-}" ]]; then
     EXTRA_ARGS+=(--wandb-entity "${WANDB_ENTITY}")
 fi
 
-python -u experiments/phase0_unet/run_all_conditions.py \
-    --conditions "${CONDITIONS}" \
-    --num-epochs "${EPOCHS}" \
-    --require-gpu \
-    --wandb-project "${WANDB_PROJECT}" \
-    --wandb-mode "${WANDB_MODE:-online}" \
-    --wandb-tags "${WANDB_TAGS}" \
-    --suffix "${SUFFIX}" \
-    "${EXTRA_ARGS[@]}"
+run_sanity() {
+    echo "\n=== PHASE 0 SANITY (5 epochs, wandb disabled) ==="
+    python -u experiments/phase0_unet/run_all_conditions.py \
+        --conditions "${CONDITIONS}" \
+        --sanity \
+        --require-gpu \
+        --suffix "_sanity"
+}
+
+run_full() {
+    echo "\n=== PHASE 0 FULL (${EPOCHS} epochs, wandb ${WANDB_MODE:-online}) ==="
+    python -u experiments/phase0_unet/run_all_conditions.py \
+        --conditions "${CONDITIONS}" \
+        --num-epochs "${EPOCHS}" \
+        --require-gpu \
+        --wandb-project "${WANDB_PROJECT}" \
+        --wandb-mode "${WANDB_MODE:-online}" \
+        --wandb-tags "${WANDB_TAGS}" \
+        --suffix "${SUFFIX}" \
+        "${EXTRA_ARGS[@]}"
+}
+
+case "${MODE}" in
+    sanity)
+        run_sanity
+        ;;
+    full)
+        run_full
+        ;;
+    sanity_then_full)
+        run_sanity
+        run_full
+        ;;
+    *)
+        echo "Unknown PHASE0_MODE=${MODE} (use sanity | full | sanity_then_full)"
+        exit 1
+        ;;
+esac
 
 echo "=== phase0_unet done ==="
 date
