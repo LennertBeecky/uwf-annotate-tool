@@ -51,6 +51,12 @@ def main() -> int:
     p.add_argument("--dice-weight", type=float, default=1.0)
     p.add_argument("--bce-weight", type=float, default=1.0)
     p.add_argument("--cldice-iters", type=int, default=5)
+    # Data-path overrides — forwarded to train_unet.py
+    p.add_argument("--db-root", type=str, default=None,
+                   help="Absolute path to databases/. On brigand: "
+                        "/esat/biomeddata/users/lbeeckma/Physics-Informed_Fundus/databases")
+    p.add_argument("--physics-npz-dir", type=str, default=None,
+                   help="Absolute path to soft-mask .npz directory.")
     args = p.parse_args()
 
     if args.sanity:
@@ -93,6 +99,10 @@ def main() -> int:
             cmd += ["--wandb-entity", args.wandb_entity]
         if args.wandb_tags:
             cmd += ["--wandb-tags", args.wandb_tags]
+        if args.db_root:
+            cmd += ["--db-root", args.db_root]
+        if args.physics_npz_dir:
+            cmd += ["--physics-npz-dir", args.physics_npz_dir]
 
         print(f"\n{'=' * 72}")
         print(f"  [{c}] {exp_name}  (mode={mode})")

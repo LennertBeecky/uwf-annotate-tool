@@ -167,6 +167,11 @@ def main() -> int:
     p.add_argument("--seed", type=int, default=None)
     p.add_argument("--num-epochs", type=int, default=None)
     p.add_argument("--batch-size", type=int, default=None)
+    p.add_argument("--db-root", type=str, default=None,
+                   help="Override cfg.db_root. On brigand: "
+                        "/esat/biomeddata/users/lbeeckma/Physics-Informed_Fundus/databases")
+    p.add_argument("--physics-npz-dir", type=str, default=None,
+                   help="Override cfg.physics_npz_dir (path to *_soft.npz files).")
     p.add_argument("--device", default=None, help="cuda/mps/cpu (auto if None)")
     p.add_argument("--require-gpu", action="store_true",
                    help="Fail fast if no CUDA/MPS accelerator is visible.")
@@ -193,6 +198,19 @@ def main() -> int:
         cfg.num_epochs = args.num_epochs
     if args.batch_size is not None:
         cfg.batch_size = args.batch_size
+    # CLI > env var > config default (so the shell wrapper's
+    # UWF_DATABASES / UWF_PHYSICS_NPZ_DIR work without code changes).
+    import os as _os
+    if args.db_root:
+        cfg.db_root = args.db_root
+    elif _os.environ.get("UWF_DATABASES"):
+        cfg.db_root = _os.environ["UWF_DATABASES"]
+    if args.physics_npz_dir:
+        cfg.physics_npz_dir = args.physics_npz_dir
+    elif _os.environ.get("UWF_PHYSICS_NPZ_DIR"):
+        cfg.physics_npz_dir = _os.environ["UWF_PHYSICS_NPZ_DIR"]
+    print(f"db_root: {cfg.db_root}")
+    print(f"physics_npz_dir: {cfg.physics_npz_dir}")
 
     _set_seed(cfg.seed)
     device = _pick_device(args.device, require_gpu=args.require_gpu)
