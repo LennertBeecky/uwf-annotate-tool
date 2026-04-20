@@ -1,0 +1,63 @@
+# Data — never commit
+databases/
+models/*.onnx
+
+# Project-level UWF smoke runs (large diagnostic outputs)
+runs/
+
+# Reference PDFs — not ours to redistribute
+*.pdf
+experiments/skeleton_reconstruction/masks/
+experiments/skeleton_reconstruction/brigand_smoke/
+experiments/skeleton_reconstruction/brigand_wrapper_test/
+experiments/skeleton_reconstruction/shard*
+experiments/skeleton_reconstruction/*.csv
+experiments/skeleton_reconstruction/errors.log
+experiments/skeleton_reconstruction/*.log
+experiments/skeleton_reconstruction/runs/
+experiments/skeleton_reconstruction/t35/
+experiments/skeleton_reconstruction/t50/
+experiments/skeleton_reconstruction/r*a/
+experiments/v2_test/
+experiments/phase0_unet/results/
+
+# Condor runtime
+condor_logs/
+
+# Large reconstructed artefacts
+experiments/skeleton_reconstruction/single_image_result.png
+experiments/skeleton_reconstruction/boundary_agreement.png
+experiments/skeleton_reconstruction/dice_histogram.png
+experiments/skeleton_reconstruction/disagreement_vs_vessel_width.png
+experiments/skeleton_reconstruction/r_squared_distribution.png
+experiments/skeleton_reconstruction/summary.txt
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+build/
+dist/
+.eggs/
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+.ipynb_checkpoints/
+
+# Virtualenvs
+.venv/
+env/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDEs
+.idea/
+.vscode/
+*.swp
+
+# Training checkpoints (large)
+*.pt
+*.pth

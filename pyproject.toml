@@ -1,0 +1,66 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "uwf-zonal-extraction"
+version = "0.1.0"
+description = "Zonal CRAE/CRVE/AVR vascular-caliber biomarker extraction from UWF retinal images."
+readme = "README.md"
+requires-python = ">=3.10"
+authors = [
+    { name = "Lennert Beeckmans", email = "lennert.beeckmans@gmail.com" },
+]
+license = { text = "Proprietary" }
+keywords = ["retina", "UWF", "CRAE", "CRVE", "AVR", "vessel diameter", "biomarker"]
+classifiers = [
+    "Private :: Do Not Upload",
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+]
+
+dependencies = [
+    "numpy>=1.24",
+    "scipy>=1.11",
+    "scikit-image>=0.22",
+    "opencv-python-headless>=4.8",
+    "pandas>=2.1",
+    "pyyaml>=6.0",
+    "tqdm>=4.66",
+]
+
+[project.optional-dependencies]
+segmentation = ["onnxruntime>=1.17"]
+gpu          = ["onnxruntime-gpu>=1.17"]
+viz          = ["matplotlib>=3.8"]
+cli          = ["typer>=0.9"]
+matching     = ["networkx>=3.2"]   # v2 vessel-graph matching (future)
+dev = [
+    "pytest>=8.0",
+    "pytest-regressions>=2.5",
+    "hypothesis>=6.98",
+    "ruff>=0.3",
+    "mypy>=1.9",
+]
+
+[project.scripts]
+uwf-extract = "uwf_zonal_extraction.cli:app"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+markers = [
+    "requires_models: tests that need ONNX model files in models/ (skip if not present)",
+    "slow:            tests that take > 10 s",
+]
+
+[tool.ruff]
+line-length = 88
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W", "N", "B", "UP"]
