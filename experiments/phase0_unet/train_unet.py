@@ -34,7 +34,17 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 
 from dataset import REYIADataset  # type: ignore  # noqa: E402
+from losses import compute_total_loss  # type: ignore  # noqa: E402
 from unet import SmallUNet, count_params  # type: ignore  # noqa: E402
+
+# wandb is optional; lazy-imported per experiment so missing-dep doesn't
+# block CPU-only dev runs.
+try:
+    import wandb  # type: ignore
+    _WANDB_AVAILABLE = True
+except ImportError:
+    wandb = None  # type: ignore[assignment]
+    _WANDB_AVAILABLE = False
 
 
 # ---------- device helpers ----------
@@ -56,27 +66,6 @@ def _set_seed(seed: int) -> None:
     torch.manual_seed(seed)
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(seed)
-
-
-# ---------- losses ----------
-
-
-def soft_dice_loss(pred: torch.Tensor, target: torch.Tensor, eps: float = 1e-6) -> torch.Tensor:
-    """Soft Dice over (B, C, H, W) maps, averaged over channels.
-    `pred` and `target` in [0, 1].
-    """
-    dims = (0, 2, 3)  # sum over B, H, W → per-channel
-    num = 2.0 * (pred * target).sum(dim=dims)
-    den = pred.sum(dim=dims) + target.sum(dim=dims) + eps
-    dice = num / den
-    return 1.0 - dice.mean()
-
-
-def compute_loss(logits: torch.Tensor, targets: torch.Tensor) -> tuple[torch.Tensor, dict]:
-    bce = F.binary_cross_entropy_with_logits(logits, targets)
-    probs = torch.sigmoid(logits)
-    dice = soft_dice_loss(probs, targets)
-    return bce + dice, {"bce": float(bce.item()), "dice_loss": float(dice.item())}
 
 
 # ---------- metrics ----------
@@ -127,15 +116,18 @@ def _load_config(path: Path) -> TrainConfig:
     return TrainConfig(**kwargs)
 
 
-def evaluate_epoch(model: SmallUNet, loader: DataLoader, device: torch.device) -> dict:
+def evaluate_epoch(model: SmallUNet, loader: DataLoader, device: torch.device,
+                   cldice_iters: int = 5) -> dict:
     model.eval()
-    total, n_batches = {"dice": 0.0, "dice_art": 0.0, "dice_vein": 0.0, "loss": 0.0}, 0
+    total, n_batches = {"dice": 0.0, "dice_art": 0.0, "dice_vein": 0.0,
+                        "loss": 0.0, "loss_bce": 0.0, "loss_dice": 0.0,
+                        "loss_cldice": 0.0}, 0
     with torch.no_grad():
         for img, lbl, _ in loader:
             img = img.to(device, non_blocking=True)
             lbl = lbl.to(device, non_blocking=True)
             logits = model(img)
-            loss, _ = compute_loss(logits, lbl)
+            loss, components = compute_total_loss(logits, lbl, cldice_iters=cldice_iters)
             probs = torch.sigmoid(logits)
             pred_bin = (probs > 0.5)
             tgt_bin = (lbl > 0.5)
@@ -143,7 +135,10 @@ def evaluate_epoch(model: SmallUNet, loader: DataLoader, device: torch.device) -
             total["dice"] += d
             total["dice_art"] += da
             total["dice_vein"] += dv
-            total["loss"] += float(loss.item())
+            total["loss"] += components["loss_total"]
+            total["loss_bce"] += components["loss_bce"]
+            total["loss_dice"] += components["loss_dice"]
+            total["loss_cldice"] += components["loss_cldice"]
             n_batches += 1
     return {k: v / max(n_batches, 1) for k, v in total.items()}
 
@@ -158,6 +153,19 @@ def main() -> int:
     p.add_argument("--batch-size", type=int, default=None)
     p.add_argument("--device", default=None, help="cuda/mps/cpu (auto if None)")
     p.add_argument("--workers", type=int, default=2)
+    # wandb
+    p.add_argument("--wandb-project", default="uwf-phase0", type=str)
+    p.add_argument("--wandb-entity", default=None, type=str,
+                   help="Team/user. If None, wandb uses your default.")
+    p.add_argument("--wandb-mode", default="online", choices=["online", "offline", "disabled"])
+    p.add_argument("--wandb-tags", default=None, type=str,
+                   help="Comma-separated tags, e.g. 'phase0,sanity'.")
+    # loss weights (match spec defaults: 1 / 1 / 1 for BCE / dice / clDice)
+    p.add_argument("--bce-weight", type=float, default=1.0)
+    p.add_argument("--dice-weight", type=float, default=1.0)
+    p.add_argument("--cldice-weight", type=float, default=1.0)
+    p.add_argument("--cldice-iters", type=int, default=5,
+                   help="Soft-skeletonisation iterations in clDice.")
     args = p.parse_args()
 
     cfg = _load_config(args.config)
@@ -178,8 +186,30 @@ def main() -> int:
     # Log effective config for reproducibility
     cfg_dump = {k: getattr(cfg, k) for k in cfg.__dataclass_fields__}
     cfg_dump.update({"mode": args.mode, "experiment_name": args.experiment_name,
-                     "device": str(device)})
+                     "device": str(device),
+                     "bce_weight": args.bce_weight,
+                     "dice_weight": args.dice_weight,
+                     "cldice_weight": args.cldice_weight,
+                     "cldice_iters": args.cldice_iters})
     (out_dir / "config_used.json").write_text(json.dumps(cfg_dump, indent=2))
+
+    # ---- wandb ----
+    wandb_run = None
+    if args.wandb_mode != "disabled" and _WANDB_AVAILABLE:
+        tags = [t.strip() for t in (args.wandb_tags or "").split(",") if t.strip()]
+        tags = tags or [args.mode]
+        wandb_run = wandb.init(
+            project=args.wandb_project,
+            entity=args.wandb_entity,
+            name=args.experiment_name,
+            tags=tags,
+            config=cfg_dump,
+            mode=args.wandb_mode,
+            dir=str(out_dir),
+        )
+    elif args.wandb_mode != "disabled" and not _WANDB_AVAILABLE:
+        print("  [wandb] package not installed; run without logging. "
+              "pip install wandb if you want curves.")
 
     train_ds = REYIADataset(
         db_root=cfg.db_root, mode=args.mode, split="train",
@@ -214,8 +244,11 @@ def main() -> int:
     csv_path = out_dir / "val_metrics.csv"
     csv_f = csv_path.open("w", newline="")
     csv_w = csv.writer(csv_f)
-    csv_w.writerow(["epoch", "train_loss", "val_loss", "val_dice", "val_dice_art",
-                    "val_dice_vein", "lr", "wall_s"])
+    csv_w.writerow([
+        "epoch", "train_loss", "train_bce", "train_dice_loss", "train_cldice_loss",
+        "val_loss", "val_bce", "val_dice_loss", "val_cldice_loss",
+        "val_dice", "val_dice_art", "val_dice_vein", "lr", "wall_s",
+    ])
     csv_f.flush()
 
     best_dice = -1.0
@@ -223,31 +256,70 @@ def main() -> int:
     for epoch in range(1, cfg.num_epochs + 1):
         model.train()
         t0 = time.time()
-        running = 0.0
+        running = {"loss_total": 0.0, "loss_bce": 0.0,
+                   "loss_dice": 0.0, "loss_cldice": 0.0}
         for img, lbl, _ in train_loader:
             img = img.to(device, non_blocking=True)
             lbl = lbl.to(device, non_blocking=True)
             optim.zero_grad(set_to_none=True)
             logits = model(img)
-            loss, _ = compute_loss(logits, lbl)
+            loss, components = compute_total_loss(
+                logits, lbl,
+                cldice_iters=args.cldice_iters,
+                cldice_weight=args.cldice_weight,
+                dice_weight=args.dice_weight,
+                bce_weight=args.bce_weight,
+            )
             loss.backward()
             optim.step()
-            running += float(loss.item())
+            for k, v in components.items():
+                running[k] += v
         scheduler.step()
-        train_loss = running / max(len(train_loader), 1)
+        n_batches = max(len(train_loader), 1)
+        train = {k: v / n_batches for k, v in running.items()}
 
-        val = evaluate_epoch(model, val_loader, device)
+        val = evaluate_epoch(model, val_loader, device, cldice_iters=args.cldice_iters)
         wall = time.time() - t0
         lr = scheduler.get_last_lr()[0]
-        print(f"[{args.experiment_name}] epoch {epoch:3d}/{cfg.num_epochs}  "
-              f"train_loss={train_loss:.4f}  val_loss={val['loss']:.4f}  "
-              f"val_dice={val['dice']:.4f} (A={val['dice_art']:.3f} "
-              f"V={val['dice_vein']:.3f})  lr={lr:.2e}  {wall:.1f}s",
-              flush=True)
-        csv_w.writerow([epoch, f"{train_loss:.6f}", f"{val['loss']:.6f}",
-                        f"{val['dice']:.6f}", f"{val['dice_art']:.6f}",
-                        f"{val['dice_vein']:.6f}", f"{lr:.6e}", f"{wall:.1f}"])
+        print(
+            f"[{args.experiment_name}] epoch {epoch:3d}/{cfg.num_epochs}  "
+            f"train={train['loss_total']:.4f} "
+            f"(bce={train['loss_bce']:.3f} dice={train['loss_dice']:.3f} "
+            f"cld={train['loss_cldice']:.3f})  "
+            f"val_loss={val['loss']:.4f}  "
+            f"val_dice={val['dice']:.4f} (A={val['dice_art']:.3f} "
+            f"V={val['dice_vein']:.3f})  lr={lr:.2e}  {wall:.1f}s",
+            flush=True,
+        )
+        csv_w.writerow([
+            epoch,
+            f"{train['loss_total']:.6f}", f"{train['loss_bce']:.6f}",
+            f"{train['loss_dice']:.6f}", f"{train['loss_cldice']:.6f}",
+            f"{val['loss']:.6f}", f"{val['loss_bce']:.6f}",
+            f"{val['loss_dice']:.6f}", f"{val['loss_cldice']:.6f}",
+            f"{val['dice']:.6f}", f"{val['dice_art']:.6f}",
+            f"{val['dice_vein']:.6f}", f"{lr:.6e}", f"{wall:.1f}",
+        ])
         csv_f.flush()
+
+        # wandb per-epoch log
+        if wandb_run is not None:
+            wandb_run.log({
+                "epoch": epoch,
+                "train/loss_total": train["loss_total"],
+                "train/loss_bce": train["loss_bce"],
+                "train/loss_dice": train["loss_dice"],
+                "train/loss_cldice": train["loss_cldice"],
+                "val/loss_total": val["loss"],
+                "val/loss_bce": val["loss_bce"],
+                "val/loss_dice": val["loss_dice"],
+                "val/loss_cldice": val["loss_cldice"],
+                "val/dice_overall": val["dice"],
+                "val/dice_artery": val["dice_art"],
+                "val/dice_vein": val["dice_vein"],
+                "lr": lr,
+                "wall_s": wall,
+            })
 
         if val["dice"] > best_dice:
             best_dice = val["dice"]
@@ -257,8 +329,13 @@ def main() -> int:
                 "val_dice": best_dice,
                 "config": cfg_dump,
             }, best_path)
+            if wandb_run is not None:
+                wandb_run.summary["best_val_dice"] = best_dice
+                wandb_run.summary["best_epoch"] = epoch
 
     csv_f.close()
+    if wandb_run is not None:
+        wandb_run.finish()
     print(f"\nBest val dice: {best_dice:.4f}  → {best_path}")
     return 0
 
