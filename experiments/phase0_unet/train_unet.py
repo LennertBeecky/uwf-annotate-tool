@@ -50,13 +50,29 @@ except ImportError:
 # ---------- device helpers ----------
 
 
-def _pick_device(override: str | None = None) -> torch.device:
+def _pick_device(override: str | None = None, require_gpu: bool = False) -> torch.device:
+    """Device selection.
+
+    Preference: CUDA → MPS → CPU. When `require_gpu=True`, raise if no
+    accelerator is visible — useful on Condor to fail fast rather than
+    burn a slot running the job on CPU by accident.
+    """
     if override:
-        return torch.device(override)
+        dev = torch.device(override)
+        if require_gpu and dev.type == "cpu":
+            raise RuntimeError("--require-gpu set but --device=cpu requested.")
+        return dev
     if torch.cuda.is_available():
         return torch.device("cuda")
     if torch.backends.mps.is_available():
         return torch.device("mps")
+    if require_gpu:
+        raise RuntimeError(
+            "--require-gpu set but no CUDA or MPS accelerator available. "
+            "Submit to a GPU node (request_gpus=1) or drop the flag."
+        )
+    print("  [warn] no GPU visible; falling back to CPU. Pass --require-gpu "
+          "to fail fast on accidental CPU runs.")
     return torch.device("cpu")
 
 
@@ -152,6 +168,8 @@ def main() -> int:
     p.add_argument("--num-epochs", type=int, default=None)
     p.add_argument("--batch-size", type=int, default=None)
     p.add_argument("--device", default=None, help="cuda/mps/cpu (auto if None)")
+    p.add_argument("--require-gpu", action="store_true",
+                   help="Fail fast if no CUDA/MPS accelerator is visible.")
     p.add_argument("--workers", type=int, default=2)
     # wandb
     p.add_argument("--wandb-project", default="uwf-phase0", type=str)
@@ -177,7 +195,7 @@ def main() -> int:
         cfg.batch_size = args.batch_size
 
     _set_seed(cfg.seed)
-    device = _pick_device(args.device)
+    device = _pick_device(args.device, require_gpu=args.require_gpu)
     print(f"Device: {device}")
 
     out_dir = Path(cfg.output_root) / args.experiment_name

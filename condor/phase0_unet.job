@@ -1,0 +1,28 @@
+universe = vanilla
+
+executable = /esat/biomeddata/users/lbeeckma/uwf/condor/phase0_unet.sh
+initialdir = /esat/biomeddata/users/lbeeckma/uwf/condor_logs
+
+Log          = phase0_unet_$(ClusterId)_$(Process).log
+Output       = phase0_unet_$(ClusterId)_$(Process).out
+Error        = phase0_unet_$(ClusterId)_$(Process).err
+
+should_transfer_files = No
+
+# Forward wandb + knob overrides set at submit time:
+#   WANDB_API_KEY=... PHASE0_EPOCHS=100 condor_submit ...
+getenv = WANDB_API_KEY,WANDB_PROJECT,WANDB_ENTITY,WANDB_TAGS,PHASE0_EPOCHS,PHASE0_CONDITIONS,PHASE0_SUFFIX
+
+# 3 conditions × ~1 h each on GPU = 3 h wall; pad to 6 h for headroom.
+RequestWallTime = 21600
+nice_user = True
+
+request_cpus = 4
+request_gpus = 1
+gpus_minimum_memory = 8G
+gpus_minimum_capability = 7.0
+request_memory = 16G
+
+Requirements = (CpuFamily == 6)
+
+queue 1
