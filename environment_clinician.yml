@@ -1,0 +1,13 @@
+name: uwf-annotate
+channels:
+  - conda-forge
+dependencies:
+  - python=3.11
+  - numpy>=1.24
+  - pillow>=10.0
+  - scipy>=1.11
+  - scikit-image>=0.22
+  - opencv>=4.8
+  - pip
+  - pip:
+      - "napari[all]>=0.4.18"
