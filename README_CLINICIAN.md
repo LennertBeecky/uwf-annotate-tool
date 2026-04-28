@@ -106,14 +106,14 @@ clinician_data/annotations/<batch_name>/
 
 ### B.3. Unzip the batch
 
-- Double-click `images.zip` in Finder/Explorer.
-- Drag the **contents** of the extracted `images/` folder into
-  `clinician_data/images_to_annotate/<batch_name>/`.
-- Same for `predictions.zip` → `clinician_data/predictions/<batch_name>/`.
+The zips contain the files at the top level (no wrapper folder), so this
+step is just drop-and-extract:
 
-> Note: when you extract a zip, you'll see an inner folder
-> (`images/` or `predictions/`). It's the **contents** of that folder you want
-> in the right place — not the folder itself.
+- Move `images.zip` into `clinician_data/images_to_annotate/<batch_name>/`,
+  then double-click to extract. The JPEGs land directly in that folder.
+- Move `predictions.zip` into `clinician_data/predictions/<batch_name>/`,
+  then double-click to extract. The PNGs land directly in that folder.
+- (Optional) delete the two `.zip` files once you're sure extraction worked.
 
 PyCharm's project tree refreshes automatically — you should see the JPEGs
 under `images_to_annotate/<batch_name>/` and the PNGs under
@@ -227,9 +227,9 @@ mkdir -p clinician_data/images_to_annotate/batch_2026-04-28
 mkdir -p clinician_data/predictions/batch_2026-04-28
 mkdir -p clinician_data/annotations/batch_2026-04-28
 
-# B.3 (unzip; -j strips the inner folder)
-unzip -j ~/Downloads/images.zip -d clinician_data/images_to_annotate/batch_2026-04-28/
-unzip -j ~/Downloads/predictions.zip -d clinician_data/predictions/batch_2026-04-28/
+# B.3 (zips are flat — files extract directly into the dest dir)
+unzip ~/Downloads/images.zip -d clinician_data/images_to_annotate/batch_2026-04-28/
+unzip ~/Downloads/predictions.zip -d clinician_data/predictions/batch_2026-04-28/
 
 # B.5
 python annotation_tool/annotate.py \
