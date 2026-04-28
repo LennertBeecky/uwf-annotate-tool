@@ -21,13 +21,16 @@ HERE = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(HERE))
 
 from utils import (  # type: ignore  # noqa: E402
+    EDIT_LOG_FIELDS,
     already_annotated,
+    append_edit_log,
     append_time_log,
     build_multiscale_pyramid,
     list_images,
     load_image_rgb,
     neighbour_count_8,
     save_skeleton_png,
+    skeleton_edit_distance,
     skeletonise_mask,
     validate_saved_skeleton,
 )
@@ -160,6 +163,67 @@ def test_already_annotated(tmp_path: Path) -> None:
     assert not already_annotated("img01", tmp_path)
     (tmp_path / "img01_veins.png").touch()
     assert already_annotated("img01", tmp_path)
+
+
+def test_skeleton_edit_distance_both_empty() -> None:
+    z = np.zeros((20, 20), dtype=np.uint8)
+    m = skeleton_edit_distance(z, z)
+    assert m == {"seed_px": 0, "final_px": 0, "kept_px": 0,
+                 "added_px": 0, "removed_px": 0, "iou": 1.0}
+
+
+def test_skeleton_edit_distance_identical() -> None:
+    seed = np.zeros((20, 20), dtype=np.uint8); seed[5, 2:18] = 255
+    m = skeleton_edit_distance(seed, seed.copy())
+    assert m["seed_px"] == 16
+    assert m["final_px"] == 16
+    assert m["kept_px"] == 16
+    assert m["added_px"] == 0
+    assert m["removed_px"] == 0
+    assert m["iou"] == 1.0
+
+
+def test_skeleton_edit_distance_partial_overlap() -> None:
+    # seed: row 5 cols 2..9 (8 px). final: row 5 cols 5..12 (8 px). overlap cols 5..9 (5 px).
+    seed = np.zeros((20, 20), dtype=np.uint8); seed[5, 2:10] = 255
+    final = np.zeros((20, 20), dtype=np.uint8); final[5, 5:13] = 255
+    m = skeleton_edit_distance(seed, final)
+    assert m["seed_px"] == 8
+    assert m["final_px"] == 8
+    assert m["kept_px"] == 5
+    assert m["added_px"] == 3
+    assert m["removed_px"] == 3
+    # IoU = 5 / (8 + 8 - 5) = 5/11
+    assert abs(m["iou"] - (5 / 11)) < 1e-3
+
+
+def test_skeleton_edit_distance_seed_all_removed() -> None:
+    seed = np.zeros((20, 20), dtype=np.uint8); seed[5, 2:10] = 255
+    final = np.zeros((20, 20), dtype=np.uint8)
+    m = skeleton_edit_distance(seed, final)
+    assert m["removed_px"] == 8
+    assert m["kept_px"] == 0
+    assert m["added_px"] == 0
+    assert m["iou"] == 0.0
+
+
+def test_append_edit_log_writes_header_and_rows(tmp_path: Path) -> None:
+    p = tmp_path / "annotation_edits.csv"
+    append_edit_log(p, {
+        "timestamp": "2026-04-21T12:00:00",
+        "image_filename": "a.png",
+        "duration_seconds": 120.0,
+        "prefill_source": "lunet",
+        "lunet_thresh": 0.5,
+        "artery_seed_px": 100, "artery_final_px": 95, "artery_kept_px": 80,
+        "artery_added_px": 15, "artery_removed_px": 20, "artery_iou": 0.72,
+        "vein_seed_px": 110, "vein_final_px": 120, "vein_kept_px": 100,
+        "vein_added_px": 20, "vein_removed_px": 10, "vein_iou": 0.78,
+    })
+    lines = p.read_text().strip().splitlines()
+    assert lines[0].split(",") == EDIT_LOG_FIELDS
+    assert "a.png" in lines[1]
+    assert "lunet" in lines[1]
 
 
 def test_append_time_log(tmp_path: Path) -> None:

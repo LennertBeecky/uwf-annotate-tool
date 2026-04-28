@@ -169,6 +169,105 @@ def append_time_log(csv_path: Path, row: dict) -> None:
         w.writerow(row)
 
 
+EDIT_LOG_FIELDS = [
+    "timestamp", "image_filename", "duration_seconds",
+    "prefill_source", "lunet_thresh",
+    "artery_seed_px", "artery_final_px",
+    "artery_kept_px", "artery_added_px", "artery_removed_px", "artery_iou",
+    "vein_seed_px", "vein_final_px",
+    "vein_kept_px", "vein_added_px", "vein_removed_px", "vein_iou",
+]
+
+
+def skeleton_edit_distance(seed_skel: np.ndarray, final_skel: np.ndarray) -> dict:
+    """Pixel-level comparison of two binary skeletons.
+
+    Both inputs: (H, W) arrays where >0 means skeleton pixel. Returns raw
+    counts and Jaccard IoU. Safe when either is empty (IoU=1.0 if both are).
+    Note: skeletons are sparse, so even small spatial shifts drop IoU
+    significantly — counts are the more robust signal.
+    """
+    seed_bin = seed_skel > 0
+    final_bin = final_skel > 0
+    kept = int((seed_bin & final_bin).sum())
+    seed_px = int(seed_bin.sum())
+    final_px = int(final_bin.sum())
+    union = int((seed_bin | final_bin).sum())
+    iou = (kept / union) if union > 0 else 1.0
+    return {
+        "seed_px": seed_px,
+        "final_px": final_px,
+        "kept_px": kept,
+        "added_px": final_px - kept,
+        "removed_px": seed_px - kept,
+        "iou": round(float(iou), 4),
+    }
+
+
+def append_edit_log(csv_path: Path, row: dict) -> None:
+    """Append one row to the annotation_edits.csv audit log."""
+    csv_path.parent.mkdir(parents=True, exist_ok=True)
+    new_file = not csv_path.exists() or csv_path.stat().st_size == 0
+    with csv_path.open("a", newline="") as f:
+        w = csv.DictWriter(f, fieldnames=EDIT_LOG_FIELDS, extrasaction="ignore")
+        if new_file:
+            w.writeheader()
+        w.writerow(row)
+
+
+def lunet_prefill_masks(
+    image_path: Path,
+    model_path: Path,
+    thresh: float = 0.5,
+    cache_dir: Path | None = None,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Run LUNet A/V segmentation (cached) and return binary seed masks.
+
+    Returns (artery_mask, vein_mask) as uint8 {0, 1} at the image's native
+    resolution. Cached probabilities are stored to
+    `cache_dir/{stem}_probs.npz` as float16 so re-opens skip inference.
+
+    Lazy imports cv2/onnxruntime so the utils test suite stays light.
+    """
+    import cv2  # noqa: PLC0415
+
+    stem = image_path.stem
+    cache_path = cache_dir / f"{stem}_probs.npz" if cache_dir is not None else None
+
+    if cache_path is not None and cache_path.exists():
+        with np.load(cache_path) as z:
+            art_probs = z["artery"].astype(np.float32)
+            vein_probs = z["vein"].astype(np.float32)
+    else:
+        import sys as _sys  # noqa: PLC0415
+
+        _src_dir = Path(__file__).resolve().parents[1] / "src"
+        if _src_dir.exists() and str(_src_dir) not in _sys.path:
+            _sys.path.insert(0, str(_src_dir))
+        from uwf_zonal_extraction.segmentation.lunet import (  # noqa: PLC0415
+            LunetSegmenter,
+        )
+
+        image_bgr = cv2.imread(str(image_path), cv2.IMREAD_COLOR)
+        if image_bgr is None:
+            raise FileNotFoundError(f"cv2 could not read {image_path}")
+        seg = LunetSegmenter(model_path)
+        probs = seg.predict_tiled(image_bgr)
+        art_probs = probs[..., 0]
+        vein_probs = probs[..., 1]
+        if cache_path is not None:
+            cache_path.parent.mkdir(parents=True, exist_ok=True)
+            np.savez_compressed(
+                cache_path,
+                artery=art_probs.astype(np.float16),
+                vein=vein_probs.astype(np.float16),
+            )
+
+    art_mask = np.where(np.isfinite(art_probs), art_probs > thresh, False).astype(np.uint8)
+    vein_mask = np.where(np.isfinite(vein_probs), vein_probs > thresh, False).astype(np.uint8)
+    return art_mask, vein_mask
+
+
 def now_iso() -> str:
     return _dt.datetime.now().isoformat(timespec="seconds")
 

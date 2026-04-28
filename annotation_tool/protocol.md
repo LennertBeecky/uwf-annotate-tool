@@ -80,11 +80,38 @@ wrong-class vessels systematically corrupt arterial/venular statistics.
 
 ## 9. Expected time per image
 
-- **UWF, ~4000×4000**: 30–45 minutes
+- **UWF, ~4000×4000**: 30–45 minutes from scratch
+- **UWF with `--prefill lunet`**: target much lower — you correct LUNet
+  instead of tracing. Actual speedup depends on LUNet quality on the image.
 - **Standard fundus, ~1444×1444**: 15–25 minutes
 
 The `annotation_times.csv` log records per-image duration — the mean across
 your session is useful for scheduling.
+
+### LUNet prefill workflow
+
+```bash
+python annotate.py <uwf_folder>/ --prefill lunet
+```
+
+What happens per image:
+
+1. LUNet A/V segmentation runs on the native-resolution image (tiled,
+   50% overlap, green-channel input). Results are cached under
+   `<output-dir>/_lunet_cache/<stem>_probs.npz` so re-opens skip inference.
+2. Probabilities are thresholded at `--lunet-thresh` (default 0.5) to
+   produce binary artery/vein masks. These populate the paint layers as
+   your starting point.
+3. You erase false positives and paint in missed vessels as usual. On `[q]`
+   the final mask is skeletonised and saved exactly as in the scratch flow.
+4. A per-image row is appended to `annotation_edits.csv` with
+   `seed_px / final_px / kept_px / added_px / removed_px / iou` for each
+   class — audit trail for how much of LUNet's output survived into GT.
+
+Bias guard: if you worry that LUNet errors are leaking into your GT, skim
+the `annotation_edits.csv` IoU column. Low IoU = you corrected heavily; IoU
+near 1 on every image with non-trivial seed counts = you may have rubber-
+stamped LUNet. Sample a few of the high-IoU cases in `preview` mode.
 
 ## 10. Saving
 
