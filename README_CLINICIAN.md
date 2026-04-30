@@ -1,193 +1,125 @@
 # UWF Vessel Annotation — Clinician Setup
 
-This is the annotation workflow for hand-tracing artery and vein skeletons on
-ultra-widefield (UWF) retinal images. The tool opens each image in a napari
-viewer with the model's prediction pre-filled as a starting point — you
-correct it (erase wrong vessels, add missed ones, fix A/V class), and save.
-
-This README is **PyCharm-first**. Equivalent terminal commands are included
-at the end for reference.
+Hand-trace artery and vein skeletons on retinal images. The tool opens each
+image with a model prediction pre-filled — you correct it, save, and move on.
 
 ---
 
-## A. One-time setup (~20 min)
+## A. One-time setup
+
+You'll do this once. About 10 minutes total.
 
 ### A.1. Install miniconda
 
-Required for the python environment. Download the installer for your OS from
+If you don't already have it: download the installer for your OS from
 <https://docs.conda.io/en/latest/miniconda.html> and run it with default
-settings.
+settings. After it finishes, **close and re-open** any terminal windows so
+`conda` is on your PATH.
 
-### A.2. Clone the repo via PyCharm
+### A.2. Run the setup script
 
-1. Open PyCharm.
-2. **File → New → Project from Version Control** (or "Get from VCS" on the
-   welcome screen).
-3. **URL**: `https://github.com/LennertBeecky/uwf.git`
-4. **Directory**: choose where to put it, e.g. `~/uwf-annotate`.
-5. Click **Clone**.
+You'll receive a `setup.command` (Mac) or `setup.bat` (Windows) file from
+Lennert via OneDrive or email. Save it anywhere convenient (Desktop is fine).
 
-### A.3. Switch to the clinician branch
+**Mac**: double-click `setup.command`. If macOS warns about an unidentified
+developer, right-click → **Open** → confirm.
 
-The bottom-right corner of PyCharm shows the current Git branch (initially
-`main`).
+**Windows**: double-click `setup.bat`. If SmartScreen warns, click **More
+info** → **Run anyway**.
 
-1. Click the branch name → **Remote Branches** → `origin/clinician_workflow`
-   → **Checkout**.
-2. After the checkout the project tree should show only:
-    - `annotation_tool/`
-    - `clinician_data/`
-    - `README_CLINICIAN.md` (this file)
-    - `environment_clinician.yml`
+A terminal window opens. The script will:
 
-### A.4. Create the conda environment
+- Check that conda is installed (errors out with a link if not)
+- Clone the annotation repo into `~/uwf-annotate/`
+- Create a conda environment called `uwf-annotate` (~5 minutes)
+- Ask you for your **annotator ID** (a short lowercase name like `ingrid`).
+  This labels every annotation you save so we know who did what.
 
-1. **Settings** (Mac: **PyCharm → Settings**; Windows/Linux: **File →
-   Settings**) → **Project: uwf-annotate** → **Python Interpreter**.
-2. Click the ⚙️ icon → **Add Interpreter** → **Add Local Interpreter**.
-3. Choose **Conda Environment** in the left panel.
-4. Select **Create new environment**.
-   - **Conda executable**: should auto-fill. If not, browse to
-     `~/miniconda3/bin/conda` (Mac/Linux) or
-     `C:\Users\<you>\miniconda3\Scripts\conda.exe` (Windows).
-   - **Python version**: `3.11`
-   - **Environment name**: `uwf-annotate`
-5. Click **OK**, then **Apply**.
+When it says "Setup complete!" you're ready.
 
-PyCharm now has an isolated env for this project.
+### A.3. Re-running setup
 
-### A.5. Install dependencies via PyCharm's terminal
-
-1. Open the terminal panel: **View → Tool Windows → Terminal** (or click
-   the **Terminal** tab at the bottom of PyCharm).
-2. The prompt should already show `(uwf-annotate)`. If not, run:
-   ```bash
-   conda activate uwf-annotate
-   ```
-3. Install everything from the env file:
-   ```bash
-   conda env update -f environment_clinician.yml --prune
-   ```
-   (~5 min the first time.)
-4. Verify:
-   ```bash
-   python -c "import napari, cv2, numpy, skimage, PIL; print('OK')"
-   ```
-   You should see `OK`. If not, contact Lennert.
-
-You only do A.1–A.5 **once**, ever.
+You can re-run `setup.command` / `setup.bat` any time. It updates the tool
+to the latest version (we may push fixes during the study).
 
 ---
 
 ## B. Per-batch workflow
 
-Each time Lennert sends a new batch:
+For each batch Lennert sends you:
 
-### B.1. Receive the batch
+### B.1. Download the batch zip
 
-You'll get three files via the shared drive (OneDrive / SharePoint / USB):
+He uploads a single file like `batch_2026-04-30.zip` to your OneDrive
+folder. Download it to your computer (Downloads folder is fine).
 
-- `images.zip`           (the raw UWFs)
-- `predictions.zip`      (the model's prefill, one `.png` per image)
-- `README.txt`           (a small per-batch note with the exact batch name)
+### B.2. Move the zip into the incoming folder
 
-The batch name is the date stamp, e.g. `batch_2026-04-28`.
+Drag `batch_2026-04-30.zip` into:
 
-### B.2. Create the per-batch folders
+- **Mac**: `~/uwf-annotate/clinician_data/incoming/`
+- **Windows**: `C:\Users\<you>\uwf-annotate\clinician_data\incoming\`
 
-In Finder/Explorer (or PyCharm's project tree → **right-click → New → Directory**),
-make these three folders inside the project:
+(In Finder/Explorer, you can also browse to `uwf-annotate` from your home
+folder, then `clinician_data` → `incoming`.)
 
-```
-clinician_data/images_to_annotate/<batch_name>/
-clinician_data/predictions/<batch_name>/
-clinician_data/annotations/<batch_name>/
-```
+### B.3. Start annotating
 
-### B.3. Unzip the batch
+Inside `uwf-annotate/scripts/clinician/`, double-click:
 
-The zips contain the files at the top level (no wrapper folder), so this
-step is just drop-and-extract:
+- **Mac**: `annotate.command`
+- **Windows**: `annotate.bat`
 
-- Move `images.zip` into `clinician_data/images_to_annotate/<batch_name>/`,
-  then double-click to extract. The JPEGs land directly in that folder.
-- Move `predictions.zip` into `clinician_data/predictions/<batch_name>/`,
-  then double-click to extract. The PNGs land directly in that folder.
-- (Optional) delete the two `.zip` files once you're sure extraction worked.
+A terminal opens, then napari. The script:
 
-PyCharm's project tree refreshes automatically — you should see the JPEGs
-under `images_to_annotate/<batch_name>/` and the PNGs under
-`predictions/<batch_name>/`.
+- Auto-extracts your batch zip
+- Activates the conda environment
+- Launches the annotation tool with the model's prediction pre-filled
+  (red = artery, blue = vein)
+- Walks through every image in the batch, skipping ones you've already
+  finished
 
-### B.4. Set up the Run Configuration (first time only — reuse for later batches)
+### B.4. While annotating
 
-1. **Run → Edit Configurations** → **+** → **Python**.
-2. Fill in:
-    - **Name**: `Annotate batch`
-    - **Script path**: `annotation_tool/annotate.py`
-    - **Parameters**:
-      ```
-      clinician_data/images_to_annotate/<batch_name>/ --output-dir clinician_data/annotations/<batch_name>/ --prefill predictions --predictions-dir clinician_data/predictions/<batch_name>/
-      ```
-      Replace `<batch_name>` with the actual date, e.g.
-      `clinician_data/images_to_annotate/batch_2026-04-28/ ...`
-    - **Python interpreter**: `uwf-annotate` (the conda env from A.4).
-    - **Working directory**: the project root (auto-filled).
-3. Click **OK**.
+Keys (also shown in the napari status bar):
 
-For a new batch later, just **edit this one Run Configuration** and update
-the three batch-name paths (or duplicate the config and keep one per
-batch).
+| Action | Mac/Windows |
+|---|---|
+| Pan / zoom | `1` |
+| Paint mode | `3` |
+| Switch artery / vein layer | `Tab` |
+| Smaller / bigger brush | `[` / `]` |
+| **Save and advance to next image** | `Q` |
+| **Skip this image** (no save) | `S` |
 
-### B.5. Annotate
+When you're done with a session, just close napari (or press `Q` after the
+last image). You can come back and run `annotate.command` again any time —
+images you've already saved are skipped automatically.
 
-1. Click the green ▶️ at the top-right of PyCharm to launch the run config.
-2. napari opens with the first un-done image:
-    - The UWF in greyscale background.
-    - Red overlay = predicted artery skeleton.
-    - Blue overlay = predicted vein skeleton.
-3. Use the in-tool tips for keys (printed in the bottom status bar):
-    - `1` = pan/zoom mode
-    - `3` = paint mode
-    - `Tab` = switch between artery and vein layers
-    - `[` / `]` = smaller / bigger brush
-    - `Q` = save and advance to the next image
-    - `S` = skip without saving
-4. **Read `annotation_tool/protocol.md` once** before your first session — it
-   covers the colour conventions, what to annotate, how to handle
-   bifurcations and crossings, and what to skip.
-5. Each save writes:
-    - `<stem>_artery.png`  (red layer)
-    - `<stem>_veins.png`   (blue layer)
-   into `clinician_data/annotations/<batch_name>/`.
+**Read `annotation_tool/protocol.md` once before your first session** — it
+covers the colour conventions, what to annotate, how to handle bifurcations
+and crossings, and what to skip.
 
-The walker auto-skips images that already have both files in the output
-directory, so you can stop and resume any time — just hit ▶️ again later.
+### B.5. From-scratch calibration
 
-### B.6. From-scratch calibration
+Roughly **1 in every 15 images, please annotate from scratch** (no
+prefill) so we can measure prefill bias later. Lennert will tell you which
+stems are flagged for the calibration set.
 
-For ~1 in every 15 images, please **annotate from scratch** (no prefill) so
-we can measure how much the prefill biases your tracing later. Easiest: keep
-a second Run Configuration called `Annotate from scratch` with the same
-parameters but `--prefill none` instead of `--prefill predictions ...`. Use
-that config for the calibration images, and note in a small text file which
-stems you did from scratch.
+### B.6. Send your annotations back
 
-### B.7. Sending annotations back
+When you've finished a batch (or want to send progress), double-click:
 
-1. Open the PyCharm terminal (View → Tool Windows → Terminal).
-2. Run:
-   ```bash
-   cd clinician_data/annotations
-   tar czf <batch_name>_annotations.tar.gz <batch_name>/
-   ```
-3. Upload the resulting `.tar.gz` to the shared OneDrive folder. Done.
+- **Mac**: `upload.command`
+- **Windows**: `upload.bat`
 
-### B.8. Updating the tool
+It packages your annotations for the batch into a single archive
+(e.g. `batch_2026-04-30_<your-name>_annotations.tar.gz` on Mac,
+`.zip` on Windows) and opens Finder/Explorer to where it lives.
 
-When Lennert pushes fixes (better prefill, bug fixes, protocol clarifications),
-just click **Git → Pull** in PyCharm. Your `clinician_data/` is in
-`.gitignore`, so your in-progress annotations are untouched.
+Drag that one file onto your OneDrive `returned/<your-name>/` folder.
+
+That's the entire workflow.
 
 ---
 
@@ -195,50 +127,48 @@ just click **Git → Pull** in PyCharm. Your `clinician_data/` is in
 
 | Symptom | Fix |
 |---|---|
-| PyCharm doesn't show the conda env after A.4 | Settings → Python Interpreter → click the ⚙️ → **Show All** → make sure `uwf-annotate` is selected |
-| `napari: command not found` in terminal | Run `conda activate uwf-annotate` |
-| Run config fails with "module not found" | Check the **Python interpreter** in the run config is `uwf-annotate`, not the system one |
-| napari opens but is blank | Toggle the layer visibility (eye icons in the layer list, left panel) |
-| Prefill is empty for a particular image | The prediction file may be missing — annotate from scratch and tell Lennert |
-| Crash on a specific image | Press `S` to skip and tell Lennert which stem |
-| `tar: command not found` (Windows) | Use 7-Zip or Windows Explorer's "Send to → Compressed folder" instead |
+| `conda: command not found` after install | Close all terminals, re-open. Or restart your computer. |
+| Mac: "cannot be opened because it is from an unidentified developer" | Right-click the `.command` file → **Open** → confirm |
+| Windows: SmartScreen blocks the `.bat` | Click **More info** → **Run anyway** |
+| napari opens but is blank | In napari's left panel, click the eye icons next to "artery" and "veins" to toggle visibility |
+| The terminal closes immediately | Re-open it from the script and check the printed error message |
+| "No batch zips found" message | You haven't dropped a batch zip into `clinician_data/incoming/` yet |
+| Prefill is empty for some images | The model has no prediction for that one. Annotate from scratch and tell Lennert |
 
-For anything else, contact Lennert (lennert.beeckmans@gmail.com) or open an
-issue on the GitHub repo.
+For anything else, contact Lennert (<lennert.beeckmans@gmail.com>) or open
+an issue on the GitHub repo.
 
 ---
 
-## D. Equivalent terminal commands
+## D. What the folders look like
 
-If you'd rather skip PyCharm and run from a plain shell:
+After your first session:
 
-```bash
-# A.2 + A.3
-git clone https://github.com/LennertBeecky/uwf.git uwf-annotate
-cd uwf-annotate
-git checkout clinician_workflow
-
-# A.4 + A.5
-conda env create -f environment_clinician.yml
-conda activate uwf-annotate
-
-# B.2 (per batch)
-mkdir -p clinician_data/images_to_annotate/batch_2026-04-28
-mkdir -p clinician_data/predictions/batch_2026-04-28
-mkdir -p clinician_data/annotations/batch_2026-04-28
-
-# B.3 (zips are flat — files extract directly into the dest dir)
-unzip ~/Downloads/images.zip -d clinician_data/images_to_annotate/batch_2026-04-28/
-unzip ~/Downloads/predictions.zip -d clinician_data/predictions/batch_2026-04-28/
-
-# B.5
-python annotation_tool/annotate.py \
-    clinician_data/images_to_annotate/batch_2026-04-28/ \
-    --output-dir clinician_data/annotations/batch_2026-04-28/ \
-    --prefill predictions \
-    --predictions-dir clinician_data/predictions/batch_2026-04-28/
-
-# B.7
-cd clinician_data/annotations
-tar czf batch_2026-04-28_annotations.tar.gz batch_2026-04-28/
 ```
+uwf-annotate/
+├── annotation_tool/                  # the tool (don't edit)
+├── clinician_data/
+│   ├── incoming/
+│   │   ├── batch_2026-04-30.zip      # ← drop new batch zips here
+│   │   └── processed/                # finished zips get moved here
+│   ├── images_to_annotate/
+│   │   └── batch_2026-04-30/
+│   │       └── <stem>.jpeg           # extracted automatically
+│   ├── predictions/
+│   │   └── batch_2026-04-30/
+│   │       └── <stem>_hard.png       # extracted automatically
+│   └── annotations/
+│       └── batch_2026-04-30/
+│           ├── <your-name>/          # your saved annotations
+│           │   ├── <stem>_artery.png
+│           │   └── <stem>_veins.png
+│           └── batch_2026-04-30_<your-name>_annotations.tar.gz
+│                                      # ← upload this to OneDrive
+├── scripts/clinician/
+│   ├── setup.command / setup.bat
+│   ├── annotate.command / annotate.bat
+│   └── upload.command / upload.bat
+└── README_CLINICIAN.md               # this file
+```
+
+You should never need to touch anything outside `clinician_data/`.
