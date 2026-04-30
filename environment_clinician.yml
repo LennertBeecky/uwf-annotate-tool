@@ -7,7 +7,12 @@ dependencies:
   - pillow>=10.0
   - scipy>=1.11
   - scikit-image>=0.22
-  - opencv>=4.8
   - pip
   - pip:
       - "napari[all]>=0.4.18"
+      # opencv-python-headless (not the conda 'opencv' package) so we don't
+      # ship a second copy of Qt6 — napari[all] already bundles PyQt6, and
+      # macOS doesn't tolerate two Qt6 frameworks in the same process
+      # ("Class QT_ROOT_LEVEL_POOL implemented in both ..." → segfault at
+      # process teardown).
+      - "opencv-python-headless>=4.8"

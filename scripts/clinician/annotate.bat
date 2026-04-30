@@ -11,6 +11,10 @@ setlocal EnableDelayedExpansion
 set "ENV_NAME=uwf-annotate"
 set "ID_FILE=%USERPROFILE%\.uwf-annotate-id"
 
+REM Silence noisy-but-harmless OpenMP / Qt warnings.
+set "KMP_WARNINGS=0"
+set "QT_LOGGING_RULES=qt.qpa.window.warning=false"
+
 REM Resolve install dir = parent of parent of this script's location.
 set "SCRIPT_DIR=%~dp0"
 pushd "%SCRIPT_DIR%..\.." >nul

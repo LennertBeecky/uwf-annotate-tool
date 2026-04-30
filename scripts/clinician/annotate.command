@@ -12,6 +12,10 @@ set -e
 ENV_NAME="uwf-annotate"
 ID_FILE="$HOME/.uwf-annotate-id"
 
+# Silence noisy-but-harmless OpenMP / Qt warnings on macOS.
+export KMP_WARNINGS=0
+export QT_LOGGING_RULES="qt.qpa.window.warning=false"
+
 # ----------------------------------------------------------------- paths
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 INSTALL_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
@@ -130,11 +134,26 @@ Launching napari... (close the window or press 'q' to save+next, 's' to skip)
 EOF
 
 # ----------------------------------------------------------------- annotate
+# Disable strict mode just for the python call — napari on macOS sometimes
+# hits a segfault during shared-library teardown after the user closes the
+# window (numpy/Qt ABI bug, harmless because annotations are saved before
+# napari quits). We don't want a 139 exit code to abort the trailing
+# "Session ended" message and the read-prompt that keeps the terminal open.
+set +e
 python annotation_tool/annotate.py \
     "$BATCH_DIR/" \
     --output-dir "$ANNOTATIONS_DIR/" \
     --prefill predictions \
     --predictions-dir "clinician_data/predictions/$BATCH_NAME/"
+PY_EXIT=$?
+set -e
+
+if [ "$PY_EXIT" -ne 0 ] && [ "$PY_EXIT" -ne 139 ]; then
+    echo "WARNING: annotate.py exited with code $PY_EXIT (your saved"
+    echo "         annotations are still on disk; re-run this script to"
+    echo "         continue). If this keeps happening, send Lennert the"
+    echo "         output above."
+fi
 
 cat <<EOF
 
