@@ -6,8 +6,8 @@ REM Idempotent: re-run any time to update.
 setlocal EnableDelayedExpansion
 
 set "INSTALL_DIR=%USERPROFILE%\uwf-annotate"
-set "REPO_URL=https://github.com/LennertBeecky/uwf.git"
-set "BRANCH=clinician_setup"
+set "REPO_URL=https://github.com/LennertBeecky/uwf-annotate-tool.git"
+set "BRANCH=main"
 set "ENV_NAME=uwf-annotate"
 set "ID_FILE=%USERPROFILE%\.uwf-annotate-id"
 

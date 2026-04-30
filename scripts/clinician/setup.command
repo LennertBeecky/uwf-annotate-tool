@@ -7,8 +7,8 @@
 set -e
 
 INSTALL_DIR="$HOME/uwf-annotate"
-REPO_URL="https://github.com/LennertBeecky/uwf.git"
-BRANCH="clinician_setup"
+REPO_URL="https://github.com/LennertBeecky/uwf-annotate-tool.git"
+BRANCH="main"
 ENV_NAME="uwf-annotate"
 ID_FILE="$HOME/.uwf-annotate-id"
 
