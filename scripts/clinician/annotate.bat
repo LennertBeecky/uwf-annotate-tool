@@ -15,6 +15,12 @@ REM Silence noisy-but-harmless OpenMP / Qt warnings.
 set "KMP_WARNINGS=0"
 set "QT_LOGGING_RULES=qt.qpa.window.warning=false"
 
+REM Force Python's basic REPL — Python 3.13's _pyrepl crashes on some
+REM Windows consoles with WinError 123 when input() is called. The
+REM uwf-annotate env pins python=3.11 so this is belt-and-braces in case
+REM 'conda run' below somehow falls through to a different interpreter.
+set "PYTHON_BASIC_REPL=1"
+
 REM Resolve install dir = parent of parent of this script's location.
 set "SCRIPT_DIR=%~dp0"
 pushd "%SCRIPT_DIR%..\.." >nul
@@ -33,9 +39,12 @@ if errorlevel 1 (
     echo ERROR: conda not found. Re-run setup.bat first.
     pause & exit /b 1
 )
-call conda activate %ENV_NAME% 2>nul
+REM Verify the env exists — we use 'conda run' below instead of 'conda
+REM activate' because activate is unreliable inside batch scripts on
+REM Windows (often falls back to base python and wrong PATH ordering).
+call conda env list | findstr /B "%ENV_NAME% " >nul
 if errorlevel 1 (
-    echo ERROR: failed to activate conda env %ENV_NAME%. Re-run setup.bat.
+    echo ERROR: conda env '%ENV_NAME%' not found. Re-run setup.bat.
     pause & exit /b 1
 )
 
@@ -100,7 +109,11 @@ echo ================================================================
 echo Launching napari... (close window or press 'q' to save+next, 's' to skip)
 echo.
 
-python annotation_tool\annotate.py ^
+REM 'conda run --no-capture-output' is the recommended pattern for
+REM non-interactive script invocation: it picks the env's interpreter
+REM directly, regardless of activation state, and pipes stdout/stderr
+REM through transparently (so napari output appears live).
+conda run --no-capture-output -n %ENV_NAME% python annotation_tool\annotate.py ^
     "!BATCH_DIR!\" ^
     --output-dir "!ANNOTATIONS_DIR!\" ^
     --prefill predictions ^
