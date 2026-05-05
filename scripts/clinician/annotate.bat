@@ -33,15 +33,34 @@ set "PROCESSED=clinician_data\incoming\processed"
 if not exist "%INCOMING%" mkdir "%INCOMING%"
 if not exist "%PROCESSED%" mkdir "%PROCESSED%"
 
-REM --- conda check
+REM --- conda check — same logic as setup.bat: probe PATH then standard
+REM     install locations, source activate.bat if needed.
+set "CONDA_ACTIVATE="
 where conda >nul 2>nul
 if errorlevel 1 (
-    echo ERROR: conda not found. Re-run setup.bat first.
-    pause & exit /b 1
+    for %%P in (
+        "%USERPROFILE%\anaconda3\Scripts\activate.bat"
+        "%USERPROFILE%\miniconda3\Scripts\activate.bat"
+        "%USERPROFILE%\Anaconda3\Scripts\activate.bat"
+        "%USERPROFILE%\Miniconda3\Scripts\activate.bat"
+        "%LOCALAPPDATA%\anaconda3\Scripts\activate.bat"
+        "%LOCALAPPDATA%\miniconda3\Scripts\activate.bat"
+        "%PROGRAMDATA%\anaconda3\Scripts\activate.bat"
+        "%PROGRAMDATA%\miniconda3\Scripts\activate.bat"
+        "C:\anaconda3\Scripts\activate.bat"
+        "C:\miniconda3\Scripts\activate.bat"
+    ) do (
+        if exist %%~P set "CONDA_ACTIVATE=%%~P"
+    )
+    if not defined CONDA_ACTIVATE (
+        echo ERROR: conda not found. Re-run setup.bat first.
+        pause & exit /b 1
+    )
+    call "!CONDA_ACTIVATE!"
 )
-REM Verify the env exists — we use 'conda run' below instead of 'conda
-REM activate' because activate is unreliable inside batch scripts on
-REM Windows (often falls back to base python and wrong PATH ordering).
+REM Verify the env exists. We use 'conda run' below instead of
+REM 'conda activate' because activate is unreliable inside batch
+REM scripts on Windows (falls back to base python with wrong PATH).
 call conda env list | findstr /B "%ENV_NAME% " >nul
 if errorlevel 1 (
     echo ERROR: conda env '%ENV_NAME%' not found. Re-run setup.bat.

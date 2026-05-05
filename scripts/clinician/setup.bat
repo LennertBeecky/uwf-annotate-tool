@@ -16,21 +16,54 @@ echo   UWF Vessel Annotation Tool -- Setup
 echo ================================================================
 echo.
 
-REM 1. conda check
+REM 1. conda check — try PATH first, then standard install locations.
+REM Anaconda's installer skips PATH by default, so plain cmd.exe usually
+REM cannot see conda even when it's installed. We probe the common
+REM locations and source activate.bat ourselves so the rest of the
+REM script can call 'conda' transparently.
+set "CONDA_ACTIVATE="
 where conda >nul 2>nul
-if errorlevel 1 (
-    echo ERROR: conda was not found on your PATH.
-    echo.
-    echo Please install miniconda first:
-    echo   https://docs.conda.io/en/latest/miniconda.html
-    echo.
-    echo Choose the Windows installer and run it with default settings.
-    echo Then open a new "Anaconda Prompt" or restart your computer
-    echo and re-run this setup script.
-    pause
-    exit /b 1
+if not errorlevel 1 (
+    echo   conda found on PATH.
+) else (
+    for %%P in (
+        "%USERPROFILE%\anaconda3\Scripts\activate.bat"
+        "%USERPROFILE%\miniconda3\Scripts\activate.bat"
+        "%USERPROFILE%\Anaconda3\Scripts\activate.bat"
+        "%USERPROFILE%\Miniconda3\Scripts\activate.bat"
+        "%LOCALAPPDATA%\anaconda3\Scripts\activate.bat"
+        "%LOCALAPPDATA%\miniconda3\Scripts\activate.bat"
+        "%PROGRAMDATA%\anaconda3\Scripts\activate.bat"
+        "%PROGRAMDATA%\miniconda3\Scripts\activate.bat"
+        "C:\anaconda3\Scripts\activate.bat"
+        "C:\miniconda3\Scripts\activate.bat"
+    ) do (
+        if exist %%~P set "CONDA_ACTIVATE=%%~P"
+    )
+    if not defined CONDA_ACTIVATE (
+        echo ERROR: conda was not found.
+        echo.
+        echo Looked on PATH and at the standard install locations:
+        echo   %%USERPROFILE%%\anaconda3\
+        echo   %%USERPROFILE%%\miniconda3\
+        echo   %%LOCALAPPDATA%%\anaconda3 / miniconda3\
+        echo   %%PROGRAMDATA%%\anaconda3 / miniconda3\
+        echo   C:\anaconda3 / C:\miniconda3\
+        echo.
+        echo If you don't have conda yet, install miniconda from:
+        echo   https://docs.conda.io/en/latest/miniconda.html
+        echo Then double-click this script again.
+        echo.
+        echo If you have conda installed somewhere else, please open
+        echo "Anaconda Prompt" or "Miniconda Prompt" from the Start menu
+        echo and re-run this script from there.
+        pause
+        exit /b 1
+    )
+    echo   conda found at: !CONDA_ACTIVATE!
+    echo   Activating conda for this session...
+    call "!CONDA_ACTIVATE!"
 )
-echo   conda found.
 
 REM 2. Repo: clone or pull
 if exist "%INSTALL_DIR%\.git" (
