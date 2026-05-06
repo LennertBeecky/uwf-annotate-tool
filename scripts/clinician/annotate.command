@@ -98,12 +98,23 @@ else
     TMPDIR=$(mktemp -d)
     unzip -q "$ZIP" -d "$TMPDIR"
 
-    # Expect bundled layout: images/, predictions/, README.txt
-    if [ -d "$TMPDIR/images" ]; then
-        mv "$TMPDIR/images/"* "clinician_data/images_to_annotate/$BATCH_NAME/" 2>/dev/null || true
-    fi
-    if [ -d "$TMPDIR/predictions" ]; then
-        mv "$TMPDIR/predictions/"* "clinician_data/predictions/$BATCH_NAME/" 2>/dev/null || true
+    # Find the actual images/ and predictions/ dirs. Two layouts in the wild:
+    #   1. bundled flat:  TMPDIR/images/, TMPDIR/predictions/
+    #   2. wrapper folder: TMPDIR/<batchname>/images/, TMPDIR/<batchname>/predictions/
+    # Layout 2 happens when Mac users re-zip an auto-extracted folder via
+    # right-click → Compress (Safari unzips on download by default). We
+    # search up to 2 levels deep for the first images/ dir; predictions/
+    # is taken from the same parent.
+    SRC_IMG=$(find "$TMPDIR" -maxdepth 2 -type d -name images 2>/dev/null | head -n 1)
+    if [ -n "$SRC_IMG" ]; then
+        mv "$SRC_IMG/"* "clinician_data/images_to_annotate/$BATCH_NAME/" 2>/dev/null || true
+        SRC_PRED="$(dirname "$SRC_IMG")/predictions"
+        if [ -d "$SRC_PRED" ]; then
+            mv "$SRC_PRED/"* "clinician_data/predictions/$BATCH_NAME/" 2>/dev/null || true
+        fi
+    else
+        echo "WARNING: extracted zip has no images/ folder. Contents:"
+        ls -la "$TMPDIR"
     fi
 
     # Move zip to processed/ so we don't re-extract on next launch.
