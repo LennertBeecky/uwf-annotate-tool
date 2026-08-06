@@ -237,6 +237,19 @@ def main(argv: list[str]) -> int:
     for var in ("QT_OPENGL", "QT_API", "QT_QPA_PLATFORM", "CONDA_PREFIX"):
         if os.environ.get(var):
             _line(f"  {var}={os.environ[var]}")
+
+    # Running envs\<name>\python.exe directly starts the right interpreter
+    # but does NOT activate the environment. On Windows that leaves the
+    # environment's DLL folder off PATH, so native libraries resolve to
+    # whatever else PATH happens to offer — a different Qt from another
+    # conda install, say. The import still succeeds and the crash comes
+    # later, at the first real call into the mismatched DLL.
+    activated = bool(os.environ.get("CONDA_PREFIX"))
+    if not activated and sys.platform == "win32":
+        _line("  [warn] CONDA_PREFIX is not set: this interpreter was started")
+        _line("         WITHOUT activating its environment. On Windows that")
+        _line("         alone can crash Qt. Prefer:")
+        _line("           conda run --no-capture-output -n uwf-annotate python ...")
     _line()
 
     if sys.platform == "win32":
@@ -297,7 +310,18 @@ def main(argv: list[str]) -> int:
     _line()
 
     _line("=" * 64)
-    if viewer_ok and not window_ok:
+    if not viewer_ok and not activated and sys.platform == "win32":
+        _line("  VERDICT: the environment was never activated, and that alone")
+        _line("  explains the crash.")
+        _line("  Starting envs\\uwf-annotate\\python.exe directly picks the")
+        _line("  right interpreter but leaves the environment's DLL folder off")
+        _line("  PATH, so Qt loads a mismatched DLL from somewhere else and")
+        _line("  dies the moment it is used.")
+        _line("  FIX: launch through conda instead —")
+        _line("    conda run --no-capture-output -n uwf-annotate python \\")
+        _line("        annotation_tool\\doctor.py report.txt")
+        _line("  annotate.bat already does this, so try it before anything else.")
+    elif viewer_ok and not window_ok:
         _line("  VERDICT: napari builds a viewer, but putting a real window")
         _line("  on screen fails. The packages are fine — something outside")
         _line("  them is stopping the window appearing.")

@@ -1,7 +1,7 @@
 @echo off
 REM UWF Annotation Tool — diagnostic (Windows).
-REM Double-click when napari won't open. Writes a report to your Desktop;
-REM send that file to Lennert.
+REM Double-click when napari won't open. Writes a report into the install
+REM folder; send that file to Lennert.
 
 setlocal EnableDelayedExpansion
 set "INSTALL_DIR=%USERPROFILE%\uwf-annotate"
@@ -15,42 +15,51 @@ echo   UWF Annotation Tool -- diagnostic
 echo ================================================================
 echo.
 
-REM Find the environment's python directly: conda is usually not on PATH,
-REM and we do not need activation to run one script.
-set "ENVPY="
-for %%P in (
-    "%USERPROFILE%\miniconda3\envs\uwf-annotate\python.exe"
-    "%USERPROFILE%\anaconda3\envs\uwf-annotate\python.exe"
-    "%USERPROFILE%\Miniconda3\envs\uwf-annotate\python.exe"
-    "%USERPROFILE%\Anaconda3\envs\uwf-annotate\python.exe"
-    "%LOCALAPPDATA%\miniconda3\envs\uwf-annotate\python.exe"
-    "%LOCALAPPDATA%\anaconda3\envs\uwf-annotate\python.exe"
-    "%PROGRAMDATA%\miniconda3\envs\uwf-annotate\python.exe"
-    "%PROGRAMDATA%\anaconda3\envs\uwf-annotate\python.exe"
-    "C:\miniconda3\envs\uwf-annotate\python.exe"
-    "C:\anaconda3\envs\uwf-annotate\python.exe"
-) do (
-    if exist %%~P set "ENVPY=%%~P"
-)
+REM Run through 'conda run', NOT by calling envs\...\python.exe directly.
+REM
+REM This script used to do the latter, on the reasoning that activation was
+REM unnecessary for a single script. That was wrong, and it sent us chasing
+REM ghosts for hours. Calling the environment's python.exe directly starts
+REM the right interpreter but does not activate the environment, which on
+REM Windows leaves the environment's DLL folder off PATH. Qt then resolves
+REM its native dependencies against whatever else is on PATH, loads a
+REM mismatched DLL, and the process dies with 0xC06D007F the moment that
+REM DLL is called -- long after the import that appeared to succeed.
+REM
+REM The same diagnostic passed under 'conda run' and crashed run directly,
+REM on the same machine, minutes apart. So: conda run.
+set "CONDA_EXE="
+if exist "%USERPROFILE%\miniconda3\Scripts\conda.exe" set "CONDA_EXE=%USERPROFILE%\miniconda3\Scripts\conda.exe"
+if exist "%USERPROFILE%\anaconda3\Scripts\conda.exe" set "CONDA_EXE=%USERPROFILE%\anaconda3\Scripts\conda.exe"
+if exist "%USERPROFILE%\Miniconda3\Scripts\conda.exe" set "CONDA_EXE=%USERPROFILE%\Miniconda3\Scripts\conda.exe"
+if exist "%USERPROFILE%\Anaconda3\Scripts\conda.exe" set "CONDA_EXE=%USERPROFILE%\Anaconda3\Scripts\conda.exe"
+if exist "%LOCALAPPDATA%\miniconda3\Scripts\conda.exe" set "CONDA_EXE=%LOCALAPPDATA%\miniconda3\Scripts\conda.exe"
+if exist "%LOCALAPPDATA%\anaconda3\Scripts\conda.exe" set "CONDA_EXE=%LOCALAPPDATA%\anaconda3\Scripts\conda.exe"
+if exist "%PROGRAMDATA%\miniconda3\Scripts\conda.exe" set "CONDA_EXE=%PROGRAMDATA%\miniconda3\Scripts\conda.exe"
+if exist "%PROGRAMDATA%\anaconda3\Scripts\conda.exe" set "CONDA_EXE=%PROGRAMDATA%\anaconda3\Scripts\conda.exe"
+if exist "C:\miniconda3\Scripts\conda.exe" set "CONDA_EXE=C:\miniconda3\Scripts\conda.exe"
+if exist "C:\anaconda3\Scripts\conda.exe" set "CONDA_EXE=C:\anaconda3\Scripts\conda.exe"
 
-if not defined ENVPY (
-    echo ERROR: could not find the uwf-annotate environment.
+if not defined CONDA_EXE where conda >nul 2>nul && set "CONDA_EXE=conda"
+
+if not defined CONDA_EXE (
+    echo ERROR: could not find conda.
     echo.
     echo That means setup did not finish. Re-run setup.bat and watch for
     echo errors while it builds the environment ^(the step that takes
     echo about 5 minutes^).
     echo.
-    > "%REPORT%" echo uwf-annotate environment not found - setup did not complete.
+    > "%REPORT%" echo conda not found - setup did not complete.
     echo A short report was still written to:
     echo   %REPORT%
     pause
     exit /b 1
 )
 
-echo   Using: !ENVPY!
+echo   Using conda: !CONDA_EXE!
 echo.
 cd /d "%INSTALL_DIR%"
-"!ENVPY!" annotation_tool\doctor.py "%REPORT%"
+"!CONDA_EXE!" run --no-capture-output -n uwf-annotate python annotation_tool\doctor.py "%REPORT%"
 
 echo.
 echo ================================================================
