@@ -133,11 +133,51 @@ REM Output is always filled pixel masks: the thickness you paint is the
 REM vessel width. A centreline can be derived from that afterwards.
 REM --prefill auto reads the batch to decide where the pre-filled vessels
 REM come from: filled artery/vein masks (DVA) or <stem>_hard.png (UWF).
+REM
+REM Everything is logged. napari failing to start on Windows is usually a
+REM graphics problem, and it dies without leaving anything on screen once
+REM the window closes - so keep a file we can actually read afterwards.
+set "LOGFILE=%INSTALL_DIR%\last_session_log.txt"
+
 conda run --no-capture-output -n %ENV_NAME% python annotation_tool\annotate.py ^
-    "!BATCH_DIR!\" ^
-    --output-dir "!ANNOTATIONS_DIR!\" ^
+    "!BATCH_DIR!" ^
+    --output-dir "!ANNOTATIONS_DIR!" ^
     --prefill auto ^
-    --masks-dir "clinician_data\predictions\!BATCH_NAME!\"
+    --masks-dir "clinician_data\predictions\!BATCH_NAME!" > "!LOGFILE!" 2>&1
+set "RC=!ERRORLEVEL!"
+type "!LOGFILE!"
+
+if not "!RC!"=="0" (
+    echo.
+    echo ================================================================
+    echo   That attempt failed ^(exit code !RC!^).
+    echo   Retrying with software graphics - napari needs OpenGL, which
+    echo   remote desktops and some display drivers do not provide.
+    echo ================================================================
+    echo.
+    set "QT_OPENGL=software"
+    set "LIBGL_ALWAYS_SOFTWARE=1"
+    set "QT_QUICK_BACKEND=software"
+    conda run --no-capture-output -n %ENV_NAME% python annotation_tool\annotate.py ^
+        "!BATCH_DIR!" ^
+        --output-dir "!ANNOTATIONS_DIR!" ^
+        --prefill auto ^
+        --masks-dir "clinician_data\predictions\!BATCH_NAME!" >> "!LOGFILE!" 2>&1
+    set "RC=!ERRORLEVEL!"
+    type "!LOGFILE!"
+    if not "!RC!"=="0" (
+        echo.
+        echo ================================================================
+        echo   Still failing. The full log is at:
+        echo     !LOGFILE!
+        echo   Send that file to Lennert.
+        echo ================================================================
+    ) else (
+        echo.
+        echo   Software graphics worked. Tell Lennert - it can be made the
+        echo   default on this PC so the retry is not needed every time.
+    )
+)
 
 echo.
 echo Session ended.
