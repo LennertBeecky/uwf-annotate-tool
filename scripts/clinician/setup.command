@@ -82,6 +82,23 @@ fi
 mkdir -p "$INSTALL_DIR/clinician_data/incoming"
 mkdir -p "$INSTALL_DIR/clinician_data/incoming/processed"
 
+# 6. Desktop shortcut, so the tool can be started without digging into
+#    the install folder. A small wrapper rather than a symlink: Finder
+#    runs a .command file directly, and a symlink to one is unreliable.
+DESKTOP="$HOME/Desktop"
+if [ -d "$DESKTOP" ]; then
+    SHORTCUT="$DESKTOP/UWF Annotate.command"
+    cat > "$SHORTCUT" <<SHORTCUT_EOF
+#!/usr/bin/env bash
+# Shortcut to the UWF annotation tool. Created by setup.command.
+exec "$INSTALL_DIR/scripts/clinician/annotate.command"
+SHORTCUT_EOF
+    chmod +x "$SHORTCUT"
+    echo "  Desktop shortcut: $SHORTCUT"
+else
+    echo "  (no Desktop folder found — start the tool from scripts/clinician/)"
+fi
+
 echo ""
 echo "================================================================"
 echo "  Setup complete!"
@@ -93,7 +110,8 @@ echo "  Next steps:"
 echo "    1. Download a batch zip (e.g. batch_2026-04-30.zip) from OneDrive."
 echo "    2. Move it into:"
 echo "         $INSTALL_DIR/clinician_data/incoming/"
-echo "    3. Double-click annotate.command (in scripts/clinician/) to start."
+echo "    3. Double-click \"UWF Annotate\" on your Desktop to start."
+echo "       (or annotate.command in scripts/clinician/)"
 echo ""
 echo "  When you're done with a batch, double-click upload.command to"
 echo "  package your annotations for upload to OneDrive."

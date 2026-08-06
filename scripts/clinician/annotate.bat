@@ -132,9 +132,12 @@ REM 'conda run --no-capture-output' is the recommended pattern for
 REM non-interactive script invocation: it picks the env's interpreter
 REM directly, regardless of activation state, and pipes stdout/stderr
 REM through transparently (so napari output appears live).
+REM --skeleton: UWF annotation is centrelines only; the tool's default is
+REM now filled masks (vessel boundaries), which UWF will move to later.
 conda run --no-capture-output -n %ENV_NAME% python annotation_tool\annotate.py ^
     "!BATCH_DIR!\" ^
     --output-dir "!ANNOTATIONS_DIR!\" ^
+    --skeleton ^
     --prefill predictions ^
     --predictions-dir "clinician_data\predictions\!BATCH_NAME!\"
 

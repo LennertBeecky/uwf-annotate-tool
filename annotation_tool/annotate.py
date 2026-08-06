@@ -1,14 +1,24 @@
-"""Napari-based UWF skeleton annotation tool.
+"""Napari-based retinal vessel annotation tool (UWF and DVA).
+
+Two output modes:
+    default        filled vessel masks; the painted thickness IS the vessel
+                   width (pixel annotations).
+    --skeleton     1-px centrelines only; width is re-derived downstream by
+                   profile fitting on the raw image.
 
 Subcommands:
-    annotate <image_or_dir>   (default)   open napari, paint artery/vein skeletons
-    preview <image_path>                  read-only napari view of saved skeletons
+    annotate <image_or_dir>   (default)   open napari, paint artery/vein vessels
+    preview <image_path>                  read-only napari view of saved masks
 
 Examples:
     python annotate.py path/to/uwf.png
-    python annotate.py path/to/uwf_folder/
-    python annotate.py preview path/to/uwf.png
     python annotate.py path/to/uwf_folder/ --overwrite
+    python annotate.py preview path/to/uwf.png
+
+    # DVA: start from the filled A/V masks and keep their width
+    python annotate.py databases/DVA/raw/images/ \
+        --prefill masks --masks-dir databases/DVA/raw \
+        --output-dir annotations_dva
 """
 
 from __future__ import annotations
@@ -27,14 +37,17 @@ sys.path.insert(0, str(HERE))
 
 from utils import (  # type: ignore  # noqa: E402
     IMG_EXTS,
+    AVSwapper,
     SaveValidation,
     already_annotated,
     append_edit_log,
     append_time_log,
+    binarise_mask,
     build_multiscale_pyramid,
     human_duration,
     list_images,
     load_image_rgb,
+    load_mask_prefill,
     lunet_prefill_masks,
     now_iso,
     save_skeleton_png,
@@ -45,6 +58,43 @@ from utils import (  # type: ignore  # noqa: E402
 
 if TYPE_CHECKING:  # keep type hints without importing napari at module load
     import napari  # noqa: F401
+
+
+# A/V reclassification keys, as (key, swap-mode). `undo` and `global` are
+# handled specially. napari checks the active layer's keymap before the
+# viewer's, so these are registered on both — see `bind_key_everywhere`.
+#
+# Every key here must be one napari does not already claim: `f` is its
+# labels fill mode and `x` swaps the selected/background label, and those
+# actions fire *alongside* a bind_key handler rather than being replaced by
+# it. tests/test_keybinds.py checks this against the installed napari.
+SWAP_KEYS = [
+    ("w", "branch"),
+    ("Shift-W", "component"),
+    ("h", "range"),
+    ("g", "disk"),
+    (".", "widen"),
+    (",", "narrow"),
+    ("u", "undo"),
+    ("Meta-Z", "undo"),      # cmd+z on macOS
+    ("Control-Z", "undo"),
+    ("Shift-X", "global"),
+]
+
+
+def bind_key_everywhere(targets, key: str, func) -> None:
+    """Bind `key` → `func` on the viewer and on every label layer.
+
+    A viewer-level binding alone loses to a Labels-layer default of the
+    same name. Targets that reject the key are skipped rather than
+    aborting the rest of the registration.
+    """
+    for target in targets:
+        try:
+            target.bind_key(key, func, overwrite=True)
+        except Exception as exc:  # napari version differences, odd key names
+            print(f"  [warn] could not bind '{key}' on "
+                  f"{getattr(target, 'name', target)}: {exc}")
 
 
 OUTPUT_DIR = Path("annotations_uwf")
@@ -64,6 +114,7 @@ def _open_annotation_session(
     prefill_source: str = "none",
     prefill_masks: tuple[np.ndarray, np.ndarray] | None = None,
     lunet_thresh: float | None = None,
+    boundaries: bool = True,
 ) -> bool:
     """Run one annotation session. Return True if user saved, False if skipped.
 
@@ -85,13 +136,22 @@ def _open_annotation_session(
     if prefill_source != "none":
         extra = f"  (thresh={lunet_thresh})" if prefill_source == "lunet" else ""
         print(f"Prefill source:  {prefill_source}{extra}")
+    print(f"Output:          {'filled masks (boundaries — width preserved)' if boundaries else '1-px skeletons'}")
     print(f"Start time:      {now_iso()}")
     print("")
     print("Tips:")
     print("  [3] paint | [1] pan/zoom | Tab cycle layers")
     print("  [ / ] decrease / increase brush size")
+    print("  A/V fix — hover the vessel, then:")
+    print("    [w] swap this segment   [W] swap the whole vessel")
+    print("    [h] [h] swap only the stretch between two marks")
+    print("    [g] swap a brush-sized blob   [X] swap both layers")
+    if boundaries:
+        print("  width — hover the vessel, then:")
+        print("    [.] widen it by 1px   [,] narrow it by 1px")
+    print("    [u] undo last swap   (alt+click = [w], pan/zoom mode only)")
     print("  [q] save and advance   [s] skip without saving")
-    print("  Target time per image: 30–45 minutes")
+    print("  Target time per image: 1 minute")
     print("")
 
     layers, multiscale = build_multiscale_pyramid(image_rgb)
@@ -114,11 +174,13 @@ def _open_annotation_session(
                 f"prefill mask shapes {art_init.shape}/{vein_init.shape} "
                 f"don't match image {(h, w)}"
             )
-        seed_artery_skel = skeletonise_mask(art_init)
-        seed_vein_skel = skeletonise_mask(vein_init)
+        _encode_seed = binarise_mask if boundaries else skeletonise_mask
+        seed_artery_skel = _encode_seed(art_init)
+        seed_vein_skel = _encode_seed(vein_init)
+        _enc = "filled" if boundaries else "skeleton"
         print(f"Seed pixels:     artery={int(art_init.sum())}  "
               f"vein={int(vein_init.sum())}  "
-              f"(skeleton: art={int((seed_artery_skel > 0).sum())} "
+              f"({_enc}: art={int((seed_artery_skel > 0).sum())} "
               f"vein={int((seed_vein_skel > 0).sum())})")
     else:
         art_init = np.zeros((h, w), dtype=np.uint8)
@@ -140,17 +202,19 @@ def _open_annotation_session(
 
     artery_layer.selected_label = 1
     vein_layer.selected_label = 1
-    artery_layer.brush_size = 2
-    vein_layer.brush_size = 2
+    default_brush = 5 if boundaries else 2
+    artery_layer.brush_size = default_brush
+    vein_layer.brush_size = default_brush
 
     viewer.layers.selection.active = artery_layer
 
     # Status-bar overlay showing active layer + brush size
-    def _refresh_overlay() -> None:
+    def _refresh_overlay(note: str = "") -> None:
         active = viewer.layers.selection.active
         brush = getattr(active, "brush_size", "—")
         name = active.name if active is not None else "—"
-        viewer.text_overlay.text = f"class: {name}   brush: {brush}"
+        suffix = f"   |   {note}" if note else ""
+        viewer.text_overlay.text = f"class: {name}   brush: {brush}{suffix}"
         viewer.text_overlay.visible = True
 
     viewer.text_overlay.font_size = 14
@@ -158,6 +222,168 @@ def _open_annotation_session(
     _refresh_overlay()
 
     state = {"should_save": True}
+
+    # ---- A/V reclassification ----------------------------------------
+    #
+    # Artery and vein live on separate layers, so fixing a swapped vessel
+    # used to mean erasing on one layer and re-painting on the other. These
+    # handlers move the vessel under the cursor across in one keystroke.
+
+    swapper = AVSwapper({"artery": np.asarray(artery_layer.data),
+                         "veins": np.asarray(vein_layer.data)})
+
+    # One undo timeline for two histories. Brush strokes live in napari's
+    # per-layer undo stack; swaps and width edits live in the swapper's.
+    # Undoing them out of order leaves orphans — a stroke that was swapped
+    # across would be removed from the source layer while its copy stayed
+    # on the destination — so record the order and walk it back.
+    timeline: list[tuple[str, object]] = []
+    for _lyr in (artery_layer, vein_layer):
+        try:
+            _lyr.events.paint.connect(
+                lambda _e, l=_lyr: timeline.append(("paint", l)))
+        except Exception as exc:
+            print(f"  [warn] no paint event on {_lyr.name}: {exc} — "
+                  f"[u] will not undo brush strokes")
+
+    def _cursor_yx() -> tuple[float, float] | None:
+        try:
+            pos = artery_layer.world_to_data(viewer.cursor.position)
+        except Exception:
+            return None
+        if pos is None or len(pos) < 2:
+            return None
+        return float(pos[-2]), float(pos[-1])
+
+    def _report(rec: dict | None, miss: str) -> None:
+        artery_layer.refresh()
+        vein_layer.refresh()
+        if rec is None:
+            _refresh_overlay(miss)
+            return
+        if rec["kind"] == "global":
+            msg = "global artery ⇄ vein   [u] undo"
+        else:
+            msg = (f"{rec['kind']} swap: {rec['n']}px "
+                   f"{rec['src']} → {rec['dst']}   [u] undo")
+        print(f"  [swap] {msg}")
+        _refresh_overlay(msg)
+
+    def _do_swap(mode: str) -> None:
+        yx = _cursor_yx()
+        if yx is None:
+            return
+        radius = None
+        if mode == "disk":
+            active = viewer.layers.selection.active
+            radius = max(4, int(getattr(active, "brush_size", 2)) * 3)
+        rec = swapper.swap_at(yx, mode=mode, radius=radius)
+        if rec is not None:
+            timeline.append(("edit", None))
+        _report(rec, "no vessel under cursor")
+
+    # First [h] marks one end of a mislabelled stretch, second [h] the other.
+    range_anchor: list[tuple[float, float]] = []
+
+    def _do_range() -> None:
+        yx = _cursor_yx()
+        if yx is None:
+            return
+        if not range_anchor:
+            if swapper.owner_at(yx) is None:
+                _refresh_overlay("no vessel under cursor")
+                return
+            range_anchor.append(yx)
+            _refresh_overlay("range start set — [h] again at the other end")
+            return
+        start = range_anchor.pop()
+        rec = swapper.swap_between(start, yx)
+        if rec is None:
+            _refresh_overlay("both ends must be on the same vessel — range cleared")
+            return
+        timeline.append(("edit", None))
+        _report(rec, "")
+
+    def _do_resize(delta: int) -> None:
+        yx = _cursor_yx()
+        if yx is None:
+            return
+        rec = swapper.resize_at(yx, delta)
+        if rec is None:
+            _refresh_overlay("no vessel under cursor")
+            return
+        timeline.append(("edit", None))
+        artery_layer.refresh()
+        vein_layer.refresh()
+        verb = "widened" if delta > 0 else "narrowed"
+        msg = f"{verb} {rec['layer']} by {abs(delta)}px ({rec['n']}px)   [u] undo"
+        print(f"  [width] {msg}")
+        _refresh_overlay(msg)
+
+    def _make_handler(mode: str):
+        if mode in ("widen", "narrow"):
+            delta = 1 if mode == "widen" else -1
+
+            def _handler(_ctx):
+                """Grow or shrink the vessel segment under the cursor."""
+                _do_resize(delta)
+            return _handler
+        if mode == "range":
+            def _handler(_ctx):
+                """Swap only the stretch between two [h] marks."""
+                _do_range()
+            return _handler
+        if mode == "undo":
+            def _handler(_ctx):
+                """Undo the last edit, whether a brush stroke or a swap."""
+                if not timeline:
+                    _refresh_overlay("nothing to undo")
+                    return
+                kind, layer = timeline.pop()
+                if kind == "paint":
+                    try:
+                        layer.undo()
+                        layer.refresh()
+                    except Exception as exc:
+                        _refresh_overlay(f"could not undo stroke: {exc}")
+                        return
+                    _refresh_overlay(f"undid brush stroke on {layer.name}")
+                    return
+                rec = swapper.undo()
+                if rec is None:
+                    _refresh_overlay("nothing to undo")
+                    return
+                artery_layer.refresh()
+                vein_layer.refresh()
+                _refresh_overlay(f"undid {rec['kind']} ({rec['n']}px)")
+            return _handler
+        if mode == "global":
+            def _handler(_ctx):
+                """Swap the artery and vein layers wholesale."""
+                timeline.append(("edit", None))
+                _report(swapper.swap_all(), "")
+            return _handler
+
+        def _handler(_ctx):
+            """Move the vessel under the cursor to the other class."""
+            _do_swap(mode)
+        return _handler
+
+    bind_targets = [viewer, artery_layer, vein_layer]
+    for key, mode in SWAP_KEYS:
+        bind_key_everywhere(bind_targets, key, _make_handler(mode))
+
+    # Alt+click does the same as [w], but only in pan/zoom mode — in paint
+    # mode the click would also lay down a brush stroke.
+    @viewer.mouse_drag_callbacks.append
+    def _alt_click_swap(_viewer, event):
+        if "Alt" not in getattr(event, "modifiers", ()):
+            return
+        active = viewer.layers.selection.active
+        if getattr(active, "mode", "pan_zoom") == "paint":
+            _refresh_overlay("alt+click needs pan/zoom mode — use [w] instead")
+            return
+        _do_swap("branch")
 
     @viewer.bind_key("q", overwrite=True)
     def _save_quit(_viewer):
@@ -236,22 +462,24 @@ def _open_annotation_session(
             print("  not overwriting — skipping save.")
             return False
 
-    artery_skel = skeletonise_mask(artery_mask)
-    vein_skel = skeletonise_mask(vein_mask)
+    encode = binarise_mask if boundaries else skeletonise_mask
+    artery_skel = encode(artery_mask)
+    vein_skel = encode(vein_mask)
     save_skeleton_png(artery_skel, art_path)
     save_skeleton_png(vein_skel, vein_path)
 
-    art_valid = validate_saved_skeleton(art_path, (h, w))
-    vein_valid = validate_saved_skeleton(vein_path, (h, w))
+    art_valid = validate_saved_skeleton(art_path, (h, w), check_thin=not boundaries)
+    vein_valid = validate_saved_skeleton(vein_path, (h, w), check_thin=not boundaries)
 
     art_pixels = int((artery_skel > 0).sum())
     vein_pixels = int((vein_skel > 0).sum())
 
     print("")
-    print(f"Saved: {art_path}  ({art_pixels} skeleton pixels)")
+    unit = "mask pixels" if boundaries else "skeleton pixels"
+    print(f"Saved: {art_path}  ({art_pixels} {unit})")
     for m in art_valid.messages:
         print(f"  [art warn] {m}")
-    print(f"Saved: {vein_path}  ({vein_pixels} skeleton pixels)")
+    print(f"Saved: {vein_path}  ({vein_pixels} {unit})")
     for m in vein_valid.messages:
         print(f"  [vein warn] {m}")
     print(f"Duration: {human_duration(duration)}")
@@ -339,10 +567,25 @@ def _compute_prefill(
     lunet_thresh: float,
     lunet_cache_dir: Path,
     predictions_dir: Path | None = None,
+    masks_dir: Path | None = None,
 ) -> tuple[np.ndarray, np.ndarray] | None:
     """Dispatch to the requested prefill backend. Returns None if disabled."""
     if prefill_source == "none":
         return None
+    if prefill_source == "masks":
+        if masks_dir is None:
+            raise ValueError("--prefill masks requires --masks-dir")
+        from PIL import Image as _Image  # noqa: PLC0415
+        shape = np.asarray(_Image.open(str(image_path))).shape[:2]
+        found = load_mask_prefill(masks_dir, image_path.stem, shape)
+        if found is None:
+            print(f"  [masks] no artery/vein mask for {image_path.stem} in "
+                  f"{masks_dir} — continuing with empty prefill")
+            return None
+        art, vein = found
+        print(f"  [masks] {image_path.stem}: artery={int(art.sum())}px "
+              f"vein={int(vein.sum())}px (filled masks, width preserved)")
+        return art, vein
     if prefill_source == "lunet":
         if not lunet_model.exists():
             raise FileNotFoundError(
@@ -394,6 +637,8 @@ def _walk_directory(
     lunet_thresh: float = 0.5,
     lunet_cache_dir: Path | None = None,
     predictions_dir: Path | None = None,
+    masks_dir: Path | None = None,
+    boundaries: bool = True,
 ) -> None:
     images = list_images(src_dir)
     if not images:
@@ -404,6 +649,8 @@ def _walk_directory(
         print(f"Prefill: lunet  (model: {lunet_model}, thresh={lunet_thresh})")
     elif prefill_source == "predictions":
         print(f"Prefill: predictions  (dir: {predictions_dir})")
+    elif prefill_source == "masks":
+        print(f"Prefill: masks  (dir: {masks_dir})")
     completed = 0
 
     def _sigint(_signum, _frame):
@@ -422,13 +669,14 @@ def _walk_directory(
         print(f"\n--- [{i + 1}/{len(images)}] {img.name} ---")
         prefill_masks = _compute_prefill(
             img, prefill_source, lunet_model, lunet_thresh, cache_dir,
-            predictions_dir=predictions_dir,
+            predictions_dir=predictions_dir, masks_dir=masks_dir,
         )
         ok = _open_annotation_session(
             img, output_dir, overwrite=overwrite,
             prefill_source=prefill_source,
             prefill_masks=prefill_masks,
             lunet_thresh=lunet_thresh if prefill_source == "lunet" else None,
+            boundaries=boundaries,
         )
         if ok:
             completed += 1
@@ -457,8 +705,11 @@ def main() -> int:
 
     parser = argparse.ArgumentParser(
         prog="annotate.py",
-        description="Napari-based UWF skeleton annotation tool. "
-                    "Use `annotate.py preview <image>` for a read-only view.",
+        description="Napari-based retinal vessel annotation tool (UWF and "
+                    "DVA). Default output is filled masks that keep the "
+                    "painted vessel width; --skeleton saves 1-px centrelines "
+                    "instead. Use `annotate.py preview <image>` for a "
+                    "read-only view.",
     )
     parser.add_argument("path", nargs="?", type=Path,
                         help="Image file or directory of images to annotate.")
@@ -466,13 +717,24 @@ def main() -> int:
                         help=f"Where skeleton PNGs are written (default {OUTPUT_DIR}).")
     parser.add_argument("--overwrite", action="store_true",
                         help="Overwrite existing skeleton files without asking.")
+    parser.add_argument("--skeleton", action="store_true",
+                        help="Save 1-px skeleton centrelines instead of the "
+                             "default filled masks. Use when only topology "
+                             "matters and width is re-derived downstream by "
+                             "profile fitting.")
+    parser.add_argument("--masks-dir", type=Path, default=None,
+                        help="Directory of filled artery/vein masks for "
+                             "--prefill masks. Accepts <dir>/artery/<stem>.png "
+                             "or <dir>/<stem>_artery.png.")
     parser.add_argument("--prefill",
-                        choices=["none", "lunet", "predictions"],
+                        choices=["none", "lunet", "predictions", "masks"],
                         default="none",
                         help="Seed the paint layers. 'lunet' runs the original "
                              "LUNet ONNX A/V segmentation. 'predictions' loads "
                              "<stem>_hard.png from --predictions-dir (use this "
-                             "with the finetuned v3/v4/v5 outputs).")
+                             "with the finetuned v3/v4/v5 outputs). 'masks' "
+                             "loads filled A/V masks from --masks-dir, "
+                             "keeping their width.")
     parser.add_argument("--predictions-dir", type=Path, default=None,
                         help="Directory of <stem>_hard.png files from a "
                              "fine-tuned model (used when --prefill predictions).")
@@ -497,6 +759,8 @@ def main() -> int:
 
     if args.prefill == "predictions" and args.predictions_dir is None:
         parser.error("--prefill predictions requires --predictions-dir")
+    if args.prefill == "masks" and args.masks_dir is None:
+        parser.error("--prefill masks requires --masks-dir")
 
     if args.path.is_dir():
         _walk_directory(
@@ -506,17 +770,20 @@ def main() -> int:
             lunet_thresh=args.lunet_thresh,
             lunet_cache_dir=cache_dir,
             predictions_dir=args.predictions_dir,
+            masks_dir=args.masks_dir,
+            boundaries=not args.skeleton,
         )
     else:
         prefill_masks = _compute_prefill(
             args.path, args.prefill, args.lunet_model, args.lunet_thresh, cache_dir,
-            predictions_dir=args.predictions_dir,
+            predictions_dir=args.predictions_dir, masks_dir=args.masks_dir,
         )
         _open_annotation_session(
             args.path, args.output_dir, overwrite=args.overwrite,
             prefill_source=args.prefill,
             prefill_masks=prefill_masks,
             lunet_thresh=args.lunet_thresh if args.prefill == "lunet" else None,
+            boundaries=not args.skeleton,
         )
     return 0
 

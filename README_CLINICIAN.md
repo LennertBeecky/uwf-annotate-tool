@@ -92,6 +92,28 @@ Keys (also shown in the napari status bar):
 | **Save and advance to next image** | `Q` |
 | **Skip this image** (no save) | `S` |
 
+**Fixing an artery/vein mix-up.** This is the most common correction, and
+you no longer need to erase and repaint. Hover the cursor over the vessel
+that has the wrong colour and press one key — the vessel moves to the other
+class, whichever layer you happen to have selected.
+
+| Action | Key |
+|---|---|
+| Swap the vessel **segment** under the cursor | `W` |
+| Swap the **whole vessel** under the cursor | `Shift` + `W` |
+| Swap only the **stretch between two points** | `H` at each end |
+| Swap everything in a small **blob** (tangles, crossings) | `G` |
+| Swap the artery and vein layers **entirely** | `Shift` + `X` |
+| **Undo** — brush strokes and swaps alike | `U`, or `Cmd`/`Ctrl` + `Z` |
+
+`W` is the everyday one: it follows the vessel and stops at its branch
+points, so correcting one branch does not drag the rest of the tree with
+it. If the colour is only wrong along *part* of a branch, press `H` at each
+end of the bad stretch instead.
+
+Undo is safe to lean on — one press steps back through whatever you did
+last, whether that was a brush stroke or a swap.
+
 When you're done with a session, just close napari (or press `Q` after the
 last image). You can come back and run `annotate.command` again any time —
 images you've already saved are skipped automatically.

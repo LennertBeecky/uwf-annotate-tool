@@ -118,6 +118,22 @@ if not exist "%INSTALL_DIR%\clinician_data\incoming\processed" (
 echo.
 echo ================================================================
 echo   Setup complete!
+REM Desktop shortcut, so the tool can be started without digging into the
+REM install folder.
+powershell -NoProfile -Command ^
+  "$ws = New-Object -ComObject WScript.Shell; ^
+   $lnk = $ws.CreateShortcut([Environment]::GetFolderPath('Desktop') + '\UWF Annotate.lnk'); ^
+   $lnk.TargetPath = '%INSTALL_DIR%\scripts\clinician\annotate.bat'; ^
+   $lnk.WorkingDirectory = '%INSTALL_DIR%'; ^
+   $lnk.IconLocation = '%SystemRoot%\System32\imageres.dll,109'; ^
+   $lnk.Description = 'UWF vessel annotation tool'; ^
+   $lnk.Save()" 2>nul
+if exist "%USERPROFILE%\Desktop\UWF Annotate.lnk" (
+    echo   Desktop shortcut: %USERPROFILE%\Desktop\UWF Annotate.lnk
+) else (
+    echo   ^(could not create Desktop shortcut — start from scripts\clinician\^)
+)
+echo.
 echo ================================================================
 echo.
 echo   Install location: %INSTALL_DIR%
@@ -126,7 +142,8 @@ echo   Next steps:
 echo     1. Download a batch zip ^(e.g. batch_2026-04-30.zip^) from OneDrive.
 echo     2. Move it into:
 echo          %INSTALL_DIR%\clinician_data\incoming\
-echo     3. Double-click annotate.bat ^(in scripts\clinician\^) to start.
+echo     3. Double-click "UWF Annotate" on your Desktop to start.
+echo        ^(or annotate.bat in scripts\clinician\^)
 echo.
 echo   When you're done with a batch, double-click upload.bat to package
 echo   your annotations for upload to OneDrive.

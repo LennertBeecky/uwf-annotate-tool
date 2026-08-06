@@ -151,9 +151,12 @@ EOF
 # napari quits). We don't want a 139 exit code to abort the trailing
 # "Session ended" message and the read-prompt that keeps the terminal open.
 set +e
+# --skeleton: UWF annotation is centrelines only; the tool's default is
+# now filled masks (vessel boundaries), which UWF will move to later.
 python annotation_tool/annotate.py \
     "$BATCH_DIR/" \
     --output-dir "$ANNOTATIONS_DIR/" \
+    --skeleton \
     --prefill predictions \
     --predictions-dir "clinician_data/predictions/$BATCH_NAME/"
 PY_EXIT=$?
