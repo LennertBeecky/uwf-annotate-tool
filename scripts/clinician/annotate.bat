@@ -95,11 +95,55 @@ if defined ZIP (
     mkdir "!TMPDIR!"
     powershell -Command "Expand-Archive -Path '!ZIP!' -DestinationPath '!TMPDIR!' -Force"
 
-    if exist "!TMPDIR!\images" (
-        xcopy /Y /Q "!TMPDIR!\images\*" "clinician_data\images_to_annotate\!BATCH_NAME!\" >nul
+    REM Find images\ at the top level OR one folder down. A zip that has
+    REM been downloaded and re-compressed on the way (browsers auto-extract,
+    REM cloud sync sometimes repacks) gains a wrapper folder. The old
+    REM top-level-only test copied nothing, said nothing, and still moved
+    REM the zip to processed\ - leaving empty batch folders and no clue why.
+    REM annotate.command has searched two levels since fa39c76; this is the
+    REM same fix for Windows.
+    set "SRC_IMG="
+    if exist "!TMPDIR!\images" set "SRC_IMG=!TMPDIR!\images"
+    if not defined SRC_IMG (
+        for /d %%d in ("!TMPDIR!\*") do (
+            if not defined SRC_IMG if exist "%%d\images" set "SRC_IMG=%%d\images"
+        )
     )
-    if exist "!TMPDIR!\predictions" (
-        xcopy /Y /Q "!TMPDIR!\predictions\*" "clinician_data\predictions\!BATCH_NAME!\" >nul
+
+    if not defined SRC_IMG (
+        echo.
+        echo ERROR: no "images" folder was found inside the zip.
+        echo.
+        echo The zip contains:
+        dir /b /s "!TMPDIR!"
+        echo.
+        echo The zip is still in %INCOMING% - nothing was lost. Send the
+        echo listing above to Lennert.
+        pause & exit /b 1
+    )
+
+    for %%p in ("!SRC_IMG!\..") do set "SRC_PARENT=%%~fp"
+    xcopy /Y /Q "!SRC_IMG!\*" "clinician_data\images_to_annotate\!BATCH_NAME!\" >nul
+    if exist "!SRC_PARENT!\predictions" (
+        xcopy /Y /Q "!SRC_PARENT!\predictions\*" "clinician_data\predictions\!BATCH_NAME!\" >nul
+    )
+
+    REM Confirm something actually landed before declaring the zip processed.
+    set "N_IMG_COPIED=0"
+    for %%f in ("clinician_data\images_to_annotate\!BATCH_NAME!\*") do set /a N_IMG_COPIED+=1
+    if !N_IMG_COPIED! EQU 0 (
+        echo.
+        echo ERROR: found "!SRC_IMG!" but copied no images out of it.
+        echo The zip is still in %INCOMING% - nothing was lost.
+        pause & exit /b 1
+    )
+    echo   Extracted !N_IMG_COPIED! images.
+    set "N_PRED_COPIED=0"
+    for %%f in ("clinician_data\predictions\!BATCH_NAME!\*") do set /a N_PRED_COPIED+=1
+    if !N_PRED_COPIED! EQU 0 (
+        echo   WARNING: no prefill found - the vessels will start empty.
+    ) else (
+        echo   Extracted !N_PRED_COPIED! prefill files.
     )
 
     move /Y "!ZIP!" "%PROCESSED%\" >nul
