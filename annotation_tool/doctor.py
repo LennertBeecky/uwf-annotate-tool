@@ -54,6 +54,33 @@ def _installed_qt_bindings() -> list[str]:
     return found
 
 
+# Windows reports a native crash as the exception code in the exit status.
+# Bare numbers cost hours to look up, and the number is often the whole
+# diagnosis, so translate the ones this stack actually dies with.
+_WINDOWS_CRASH_CODES = {
+    0xC06D007E: "a DLL a Qt/napari component needs was not found at load "
+                "time (delay-load module missing)",
+    0xC06D007F: "a DLL was found but is the wrong version — it does not "
+                "contain a function that was asked for (delay-load entry "
+                "point missing). Usually an out-of-date Visual C++ "
+                "Redistributable, or a stale DLL earlier on PATH.",
+    0xC0000005: "access violation — a segfault inside a native library",
+    0xC0000135: "a required DLL could not be found",
+    0xC0000142: "a DLL failed to initialise",
+    0xC000007B: "a 32-bit/64-bit mismatch between loaded DLLs",
+    0xC0000409: "stack buffer overrun (fail-fast) inside a native library",
+    0xC00000FD: "stack overflow",
+}
+
+
+def _describe_exit_code(code: int) -> str:
+    """Human-readable cause for a native crash exit status, if we know one."""
+    unsigned = code & 0xFFFFFFFF
+    known = _WINDOWS_CRASH_CODES.get(unsigned)
+    text = f"code {code} (0x{unsigned:08X})"
+    return f"{text}: {known}" if known else text
+
+
 def _run_isolated(code: str) -> str:
     """Run a probe in a fresh interpreter and return its last line.
 
@@ -72,7 +99,8 @@ def _run_isolated(code: str) -> str:
     if proc.returncode != 0:
         detail = (out + "\n" + err).strip()
         raise RuntimeError(detail[-1200:] if detail
-                           else f"process died with code {proc.returncode} "
+                           else f"process died with "
+                                f"{_describe_exit_code(proc.returncode)} "
                                 f"(no output — a hard crash, not an exception)")
     return out.splitlines()[-1] if out else "ok"
 
@@ -151,6 +179,16 @@ def main(argv: list[str]) -> int:
     napari_ok, detail = _check("import napari", _package_version("napari"))
     if not napari_ok:
         tracebacks["napari"] = detail
+    napari_version_matches = True
+    if napari_ok:
+        try:
+            installed = __import__("napari").__version__
+        except Exception:
+            installed = ""
+        napari_version_matches = installed == TESTED_NAPARI_VERSION
+        if not napari_version_matches:
+            _line(f"  [warn] this is not the tested version "
+                  f"({TESTED_NAPARI_VERSION}) — see the verdict below")
     viewer_ok = False
     if napari_ok:
         viewer_ok, detail = _check("open a viewer", _viewer_probe)
@@ -187,6 +225,13 @@ def main(argv: list[str]) -> int:
         _line("    1. set QT_OPENGL=software     (then start the tool again)")
         _line("    2. install the GPU driver from Intel/NVIDIA/AMD directly")
         _line("    3. if this is a remote desktop, try it at the machine")
+    elif not napari_version_matches:
+        _line("  VERDICT: Qt and OpenGL are fine, but napari is not the")
+        _line(f"  version this tool was tested against ({TESTED_NAPARI_VERSION}).")
+        _line("  An untested napari is the most likely cause of a viewer")
+        _line("  that dies without an error message.")
+        _line("  FIX: in the uwf-annotate environment run")
+        _line(f"    pip install \"napari[all]=={TESTED_NAPARI_VERSION}\"")
     else:
         _line("  VERDICT: Qt and OpenGL look fine but the viewer failed.")
         _line("  Send the traceback below.")
@@ -202,6 +247,10 @@ def main(argv: list[str]) -> int:
 
 
 DEFAULT_REPORT_NAME = "uwf_annotate_diagnostic.txt"
+
+# The napari the tool is actually tested against. Keep in step with the pin
+# in environment_clinician.yml / requirements_clinician.txt.
+TESTED_NAPARI_VERSION = "0.7.0"
 
 
 def resolve_report_path(requested: str | None) -> "Path":

@@ -9,7 +9,12 @@ dependencies:
   - scikit-image>=0.22
   - pip
   - pip:
-      - "napari[all]>=0.4.18"
+      # Pinned, not ">=". An unpinned floor meant every clinician install
+      # resolved to whatever napari was newest that day: the Mac this tool
+      # is tested on got 0.7.0, a Windows PC installed later got 0.8.0, and
+      # 0.8.0 hard-crashed on viewer creation there. Only bump this after
+      # re-running the test suite against the new version.
+      - "napari[all]==0.7.0"
       # opencv-python-headless (not the conda 'opencv' package) so we don't
       # ship a second copy of Qt6 — napari[all] already bundles PyQt6, and
       # macOS doesn't tolerate two Qt6 frameworks in the same process

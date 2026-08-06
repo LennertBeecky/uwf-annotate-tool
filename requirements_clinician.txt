@@ -1,4 +1,7 @@
-napari[all]>=0.4.18
+# napari is pinned, not floored: an unpinned ">=" meant each install
+# resolved to whatever was newest that day. The tested version is 0.7.0;
+# a Windows PC that resolved to 0.8.0 hard-crashed on viewer creation.
+napari[all]==0.7.0
 numpy>=1.24
 pillow>=10.0
 scipy>=1.11
