@@ -5,7 +5,13 @@ REM send that file to Lennert.
 
 setlocal EnableDelayedExpansion
 set "INSTALL_DIR=%USERPROFILE%\uwf-annotate"
+REM OneDrive commonly redirects the Desktop, so %USERPROFILE%\Desktop may
+REM not exist. Prefer the redirected one when it is there. doctor.py falls
+REM back on its own too, and prints wherever it actually wrote.
 set "REPORT=%USERPROFILE%\Desktop\uwf_annotate_diagnostic.txt"
+if exist "%USERPROFILE%\OneDrive\Desktop" (
+    set "REPORT=%USERPROFILE%\OneDrive\Desktop\uwf_annotate_diagnostic.txt"
+)
 
 echo ================================================================
 echo   UWF Annotation Tool -- diagnostic

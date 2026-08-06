@@ -176,9 +176,31 @@ def main(argv: list[str]) -> int:
     return 0 if viewer_ok else 1
 
 
+def resolve_report_path(requested: str) -> "Path":
+    """Somewhere the report can actually be written, and be found again.
+
+    `%USERPROFILE%\\Desktop` often does not exist on Windows: OneDrive
+    redirects the Desktop to `%USERPROFILE%\\OneDrive\\Desktop`, so writing
+    there fails and the annotator is told to look for a file that was never
+    created. Fall back through the plausible locations, and never fail —
+    a report in the wrong folder beats no report.
+    """
+    from pathlib import Path
+
+    p = Path(requested).expanduser()
+    if p.parent.exists():
+        return p
+    home = Path.home()
+    for alt in (home / "OneDrive" / "Desktop", home / "Desktop", home):
+        if alt.is_dir():
+            return alt / p.name
+    return Path.cwd() / p.name
+
+
 if __name__ == "__main__":
     out_path = sys.argv[1] if len(sys.argv) > 1 else None
     if out_path:
+        out_path = str(resolve_report_path(out_path))
         import io
 
         buf = io.StringIO()
@@ -189,9 +211,18 @@ if __name__ == "__main__":
         })()
         code = main(sys.argv)
         sys.stdout = real
-        with open(out_path, "w", encoding="utf-8") as fh:
-            fh.write(buf.getvalue())
-        print(f"\nReport written to: {out_path}")
+        try:
+            with open(out_path, "w", encoding="utf-8") as fh:
+                fh.write(buf.getvalue())
+            print("\n" + "=" * 64)
+            print("  REPORT WRITTEN TO:")
+            print(f"    {out_path}")
+            print("  Send that file back. If you cannot find it, copy the")
+            print("  VERDICT block above instead.")
+            print("=" * 64)
+        except Exception as exc:
+            print(f"\nCould not write the report ({exc}).")
+            print("Copy the VERDICT block above instead.")
     else:
         code = main(sys.argv)
     sys.exit(code)
