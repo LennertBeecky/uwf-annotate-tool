@@ -633,6 +633,25 @@ def align_mask_to_image(mask: np.ndarray, shape: tuple[int, int]) -> np.ndarray:
     return out
 
 
+def detect_prefill_kind(masks_dir: Path) -> str:
+    """What kind of prefill a batch carries: 'masks', 'predictions', 'none'.
+
+    The clinician launcher is a single double-click for every batch, so the
+    batch has to declare itself rather than the annotator picking a flag:
+    DVA ships filled artery/vein masks and wants pixel output, UWF ships
+    <stem>_hard.png and wants skeletons. Masks win if both are somehow
+    present, since they carry strictly more information.
+    """
+    if not masks_dir.is_dir():
+        return "none"
+    if any((masks_dir / "artery").glob("*.png")) if (masks_dir / "artery").is_dir() \
+            else any(masks_dir.glob("*_artery.png")):
+        return "masks"
+    if any(masks_dir.glob("*_hard.png")):
+        return "predictions"
+    return "none"
+
+
 def load_mask_prefill(masks_dir: Path, stem: str, shape: tuple[int, int]
                       ) -> tuple[np.ndarray, np.ndarray] | None:
     """Load filled artery/vein masks for `stem`, or None if absent.

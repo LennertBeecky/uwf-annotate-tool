@@ -43,6 +43,7 @@ from utils import (  # type: ignore  # noqa: E402
     append_edit_log,
     append_time_log,
     binarise_mask,
+    detect_prefill_kind,
     build_multiscale_pyramid,
     human_duration,
     list_images,
@@ -727,14 +728,17 @@ def main() -> int:
                              "--prefill masks. Accepts <dir>/artery/<stem>.png "
                              "or <dir>/<stem>_artery.png.")
     parser.add_argument("--prefill",
-                        choices=["none", "lunet", "predictions", "masks"],
+                        choices=["none", "lunet", "predictions", "masks", "auto"],
                         default="none",
                         help="Seed the paint layers. 'lunet' runs the original "
                              "LUNet ONNX A/V segmentation. 'predictions' loads "
                              "<stem>_hard.png from --predictions-dir (use this "
                              "with the finetuned v3/v4/v5 outputs). 'masks' "
                              "loads filled A/V masks from --masks-dir, "
-                             "keeping their width.")
+                             "keeping their width. 'auto' inspects the "
+                             "directory and picks: filled masks (DVA, pixel "
+                             "output) or <stem>_hard.png (UWF, skeleton "
+                             "output).")
     parser.add_argument("--predictions-dir", type=Path, default=None,
                         help="Directory of <stem>_hard.png files from a "
                              "fine-tuned model (used when --prefill predictions).")
@@ -762,6 +766,25 @@ def main() -> int:
     if args.prefill == "masks" and args.masks_dir is None:
         parser.error("--prefill masks requires --masks-dir")
 
+    # `auto` lets the batch declare where its prefill comes from, so one
+    # launcher serves both datasets. It never changes the OUTPUT: pixels
+    # are always what gets saved, and a skeleton can be derived from them
+    # afterwards. Only an explicit --skeleton thins the output.
+    boundaries = not args.skeleton
+    if args.prefill == "auto":
+        probe = args.masks_dir or args.predictions_dir
+        if probe is None:
+            parser.error("--prefill auto requires --masks-dir or --predictions-dir")
+        kind = detect_prefill_kind(probe)
+        args.prefill = kind
+        if kind == "masks":
+            args.masks_dir = probe
+        elif kind == "predictions":
+            args.predictions_dir = probe
+        print(f"Prefill (auto):  {kind} from {probe}")
+        print(f"Output (auto):   "
+              f"{'filled masks — vessel width kept' if boundaries else '1-px skeletons'}")
+
     if args.path.is_dir():
         _walk_directory(
             args.path, args.output_dir, overwrite=args.overwrite,
@@ -771,7 +794,7 @@ def main() -> int:
             lunet_cache_dir=cache_dir,
             predictions_dir=args.predictions_dir,
             masks_dir=args.masks_dir,
-            boundaries=not args.skeleton,
+            boundaries=boundaries,
         )
     else:
         prefill_masks = _compute_prefill(
@@ -783,7 +806,7 @@ def main() -> int:
             prefill_source=args.prefill,
             prefill_masks=prefill_masks,
             lunet_thresh=args.lunet_thresh if args.prefill == "lunet" else None,
-            boundaries=not args.skeleton,
+            boundaries=boundaries,
         )
     return 0
 

@@ -100,3 +100,34 @@ def test_boundary_output_is_the_default():
 
     sig = inspect.signature(annotate._open_annotation_session)
     assert sig.parameters["boundaries"].default is True
+
+
+def test_pixel_output_is_never_downgraded_automatically():
+    """Pixels are the deliverable. A skeleton is derivable from them.
+
+    Nothing may flip the output to skeleton on its own — not the prefill
+    kind, not the batch type. Only an explicit --skeleton does that.
+    """
+    import pathlib
+
+    src = pathlib.Path(__file__).resolve().parents[1] / "annotate.py"
+    text = src.read_text()
+    assert "boundaries = False" not in text
+    assert "boundaries = not args.skeleton" in text
+
+
+def test_the_clinician_launchers_do_not_thin_the_output():
+    """The launchers are what actually runs in the field."""
+    import pathlib
+    import subprocess
+
+    repo = pathlib.Path(__file__).resolve().parents[2]
+    for script in ("annotate.command", "annotate.bat"):
+        blob = subprocess.run(
+            ["git", "show", f"clinician_setup:scripts/clinician/{script}"],
+            cwd=repo, capture_output=True, text=True)
+        if blob.returncode != 0:
+            continue                      # branch not present in this checkout
+        body = "\n".join(l for l in blob.stdout.splitlines()
+                         if not l.strip().startswith(("#", "REM")))
+        assert "--skeleton" not in body, f"{script} still thins the output"

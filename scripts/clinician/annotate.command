@@ -151,14 +151,17 @@ EOF
 # napari quits). We don't want a 139 exit code to abort the trailing
 # "Session ended" message and the read-prompt that keeps the terminal open.
 set +e
-# --skeleton: UWF annotation is centrelines only; the tool's default is
-# now filled masks (vessel boundaries), which UWF will move to later.
+# Output is always filled pixel masks: the thickness you paint is the
+# vessel width. A centreline can be derived from that afterwards, so
+# nothing is lost by saving pixels.
+#
+# --prefill auto reads the batch to decide where the pre-filled vessels
+# come from: filled artery/vein masks (DVA) or <stem>_hard.png (UWF).
 python annotation_tool/annotate.py \
     "$BATCH_DIR/" \
     --output-dir "$ANNOTATIONS_DIR/" \
-    --skeleton \
-    --prefill predictions \
-    --predictions-dir "clinician_data/predictions/$BATCH_NAME/"
+    --prefill auto \
+    --masks-dir "clinician_data/predictions/$BATCH_NAME/"
 PY_EXIT=$?
 set -e
 

@@ -28,6 +28,7 @@ from utils import (  # type: ignore  # noqa: E402
     apply_swap,
     load_mask_prefill,
     binarise_mask,
+    detect_prefill_kind,
     branch_at,
     component_at,
     disk_at,
@@ -762,3 +763,43 @@ def test_repeated_widening_keeps_acting_on_the_same_segment():
     assert second["n"] < first["n"] * 2
     # The neighbour keeps its own width; it was not swept into the segment.
     assert art[36, 50] == 0
+
+
+# ---- prefill auto-detection ----
+#
+# The clinician launcher is one double-click for every batch, so the batch
+# itself has to say what kind it is: DVA ships filled A/V masks and wants
+# pixel output, UWF ships <stem>_hard.png and wants skeletons.
+
+
+def test_detects_a_dva_batch_from_flat_masks(tmp_path):
+    for cls in ("artery", "veins"):
+        save_skeleton_png(np.zeros((10, 10), dtype=np.uint8),
+                          tmp_path / f"s1_{cls}.png")
+    assert detect_prefill_kind(tmp_path) == "masks"
+
+
+def test_detects_a_dva_batch_from_mask_subdirectories(tmp_path):
+    for cls in ("artery", "veins"):
+        (tmp_path / cls).mkdir()
+        save_skeleton_png(np.zeros((10, 10), dtype=np.uint8),
+                          tmp_path / cls / "s1.png")
+    assert detect_prefill_kind(tmp_path) == "masks"
+
+
+def test_detects_a_uwf_batch_from_hard_predictions(tmp_path):
+    save_skeleton_png(np.zeros((10, 10), dtype=np.uint8), tmp_path / "s1_hard.png")
+    assert detect_prefill_kind(tmp_path) == "predictions"
+
+
+def test_detects_nothing_in_an_empty_or_missing_directory(tmp_path):
+    assert detect_prefill_kind(tmp_path) == "none"
+    assert detect_prefill_kind(tmp_path / "does_not_exist") == "none"
+
+
+def test_masks_win_when_a_batch_somehow_has_both(tmp_path):
+    save_skeleton_png(np.zeros((10, 10), dtype=np.uint8), tmp_path / "s1_hard.png")
+    for cls in ("artery", "veins"):
+        save_skeleton_png(np.zeros((10, 10), dtype=np.uint8),
+                          tmp_path / f"s1_{cls}.png")
+    assert detect_prefill_kind(tmp_path) == "masks"
