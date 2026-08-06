@@ -139,6 +139,15 @@ REM graphics problem, and it dies without leaving anything on screen once
 REM the window closes - so keep a file we can actually read afterwards.
 set "LOGFILE=%INSTALL_DIR%\last_session_log.txt"
 
+REM Software rendering FIRST on Windows. napari draws through OpenGL, and
+REM remote desktop sessions and stock display drivers frequently provide no
+REM usable GL context - the failure mode is the window never appearing. DVA
+REM frames are 720x720, so software rasterising costs nothing noticeable.
+REM If it fails we retry on the GPU below, which is the faster path for
+REM large UWF images.
+set "QT_OPENGL=software"
+set "LIBGL_ALWAYS_SOFTWARE=1"
+
 conda run --no-capture-output -n %ENV_NAME% python annotation_tool\annotate.py ^
     "!BATCH_DIR!" ^
     --output-dir "!ANNOTATIONS_DIR!" ^
@@ -151,13 +160,11 @@ if not "!RC!"=="0" (
     echo.
     echo ================================================================
     echo   That attempt failed ^(exit code !RC!^).
-    echo   Retrying with software graphics - napari needs OpenGL, which
-    echo   remote desktops and some display drivers do not provide.
+    echo   Retrying with the graphics card instead of software rendering.
     echo ================================================================
     echo.
-    set "QT_OPENGL=software"
-    set "LIBGL_ALWAYS_SOFTWARE=1"
-    set "QT_QUICK_BACKEND=software"
+    set "QT_OPENGL="
+    set "LIBGL_ALWAYS_SOFTWARE="
     conda run --no-capture-output -n %ENV_NAME% python annotation_tool\annotate.py ^
         "!BATCH_DIR!" ^
         --output-dir "!ANNOTATIONS_DIR!" ^
@@ -174,8 +181,8 @@ if not "!RC!"=="0" (
         echo ================================================================
     ) else (
         echo.
-        echo   Software graphics worked. Tell Lennert - it can be made the
-        echo   default on this PC so the retry is not needed every time.
+        echo   The graphics card worked. Tell Lennert - software rendering
+        echo   can be turned off for this PC.
     )
 )
 
