@@ -54,43 +54,57 @@ def _installed_qt_bindings() -> list[str]:
     return found
 
 
-def _opengl_probe() -> str:
-    """Create an offscreen GL context and report the driver's version.
+def _run_isolated(code: str) -> str:
+    """Run a probe in a fresh interpreter and return its last line.
 
-    This is the check that usually explains a silent napari crash: remote
-    desktop sessions, VMs and stock Intel drivers often expose no usable
-    OpenGL, and napari renders through it.
+    Anything that touches Qt runs out-of-process. A QApplication created
+    here would collide with the one napari makes later — "QApplication::
+    regClass ... class already exists" — so the diagnostic would trigger
+    the very fault it is meant to report, and take itself down before
+    writing anything.
     """
-    from qtpy.QtGui import QOffscreenSurface, QOpenGLContext
-    from qtpy.QtWidgets import QApplication
+    import subprocess
 
-    app = QApplication.instance() or QApplication([])
-    surface = QOffscreenSurface()
-    surface.create()
-    ctx = QOpenGLContext()
-    if not ctx.create():
-        raise RuntimeError("QOpenGLContext.create() failed — no usable OpenGL")
-    if not ctx.makeCurrent(surface):
-        raise RuntimeError("could not make the OpenGL context current")
-    try:
-        fmt = ctx.format()
-        version = f"OpenGL {fmt.majorVersion()}.{fmt.minorVersion()}"
-    finally:
-        ctx.doneCurrent()
-    return version
+    proc = subprocess.run([sys.executable, "-c", code],
+                          capture_output=True, text=True, timeout=180)
+    out = (proc.stdout or "").strip()
+    err = (proc.stderr or "").strip()
+    if proc.returncode != 0:
+        detail = (out + "\n" + err).strip()
+        raise RuntimeError(detail[-1200:] if detail
+                           else f"process died with code {proc.returncode} "
+                                f"(no output — a hard crash, not an exception)")
+    return out.splitlines()[-1] if out else "ok"
+
+
+_GL_CODE = """
+from qtpy.QtGui import QOffscreenSurface, QOpenGLContext
+from qtpy.QtWidgets import QApplication
+app = QApplication.instance() or QApplication([])
+surface = QOffscreenSurface(); surface.create()
+ctx = QOpenGLContext()
+assert ctx.create(), 'QOpenGLContext.create() failed - no usable OpenGL'
+assert ctx.makeCurrent(surface), 'could not make the OpenGL context current'
+fmt = ctx.format()
+print('OpenGL %d.%d' % (fmt.majorVersion(), fmt.minorVersion()))
+"""
+
+_VIEWER_CODE = """
+import numpy as np, napari
+v = napari.Viewer(show=False)
+v.add_image(np.zeros((16, 16), dtype='uint8'), name='probe')
+print('viewer created with %d layer(s)' % len(v.layers))
+v.close()
+"""
+
+
+def _opengl_probe() -> str:
+    """Offscreen GL context, out-of-process, reporting the driver version."""
+    return _run_isolated(_GL_CODE)
 
 
 def _viewer_probe() -> str:
-    import napari
-
-    viewer = napari.Viewer(show=False)
-    try:
-        import numpy as np
-
-        viewer.add_image(np.zeros((16, 16), dtype="uint8"), name="probe")
-        return f"viewer created with {len(viewer.layers)} layer(s)"
-    finally:
-        viewer.close()
+    return _run_isolated(_VIEWER_CODE)
 
 
 def main(argv: list[str]) -> int:
@@ -153,6 +167,15 @@ def main(argv: list[str]) -> int:
         _line("  VERDICT: the conda environment is incomplete.")
         _line("  FIX: re-run setup and watch for errors while it builds the")
         _line("       environment.")
+    elif len(bindings) > 1:
+        _line(f"  VERDICT: {len(bindings)} Qt bindings installed "
+              f"({', '.join(bindings)}).")
+        _line("  Two Qt libraries in one process collide - the symptom is")
+        _line("  'QApplication::regClass ... class already exists' and a")
+        _line("  window that never appears.")
+        _line("  FIX: keep one. In the uwf-annotate environment run")
+        for extra in bindings[1:]:
+            _line(f"    pip uninstall -y {extra}")
     elif not bindings or not qt_ok:
         _line("  VERDICT: no working Qt binding.")
         _line("  FIX: pip install \"napari[pyqt5]\"")
@@ -201,35 +224,64 @@ def resolve_report_path(requested: str | None) -> "Path":
     return Path.cwd() / p.name
 
 
-if __name__ == "__main__":
-    # Always write a report. Requiring an argument to get a file is how the
-    # report went missing in the first place.
-    import io
+class _Tee:
+    """Write to the console and to the report file, flushing every line.
 
+    The report is written as it is produced, not buffered and saved at the
+    end. The failure this tool exists to diagnose — Qt or OpenGL unable to
+    start — kills the process outright rather than raising, so a report
+    assembled in memory would never reach disk. Written this way, the last
+    line in the file is the probe that killed it.
+    """
+
+    def __init__(self, console, handle):
+        self._console = console
+        self._handle = handle
+
+    def write(self, text):
+        self._console.write(text)
+        if self._handle is not None:
+            try:
+                self._handle.write(text)
+                self._handle.flush()
+                os.fsync(self._handle.fileno())
+            except Exception:
+                pass
+
+    def flush(self):
+        self._console.flush()
+
+
+if __name__ == "__main__":
+    # Always write a report, from the first line. Requiring an argument to
+    # get a file is how the report went missing the first time; buffering it
+    # is how it went missing the second.
     out_path = resolve_report_path(sys.argv[1] if len(sys.argv) > 1 else None)
 
-    buf = io.StringIO()
-    real = sys.stdout
-    sys.stdout = type("Tee", (), {
-        "write": lambda _s, t: (real.write(t), buf.write(t)) and None,
-        "flush": lambda _s: real.flush(),
-    })()
-    code = main(sys.argv)
-    sys.stdout = real
-
+    handle = None
     try:
-        out_path.write_text(buf.getvalue(), encoding="utf-8")
-        written = str(out_path.resolve())
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        handle = open(out_path, "w", encoding="utf-8", buffering=1)
     except Exception as exc:
-        written = None
-        print(f"\nCould not write the report ({exc}).")
+        print(f"Could not open {out_path} for writing ({exc}).")
 
-    print("\n" + "=" * 64)
-    if written:
-        print("  REPORT WRITTEN TO:")
-        print(f"    {written}")
-        print("  Send that file back — or just copy the VERDICT block above.")
-    else:
-        print("  Copy the VERDICT block above and send that.")
-    print("=" * 64)
+    real = sys.stdout
+    sys.stdout = _Tee(real, handle)
+    print(f"(report file: {out_path.resolve() if handle else 'NOT WRITABLE'})")
+
+    code = 1
+    try:
+        code = main(sys.argv)
+    except BaseException:
+        print("\nThe diagnostic itself crashed:")
+        print(traceback.format_exc())
+    finally:
+        sys.stdout = real
+        if handle is not None:
+            handle.close()
+            print("\n" + "=" * 64)
+            print("  REPORT WRITTEN TO:")
+            print(f"    {out_path.resolve()}")
+            print("  Send that file — or copy the VERDICT block above.")
+            print("=" * 64)
     sys.exit(code)
