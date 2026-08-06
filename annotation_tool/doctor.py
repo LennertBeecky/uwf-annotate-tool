@@ -191,6 +191,24 @@ v.close()
 """
 
 
+# The probe above builds the viewer with show=False, which never puts a
+# window on screen. That is the wrong thing to test on a machine where the
+# complaint is "the window never appears": constructing a viewer and
+# displaying one exercise different code — real window creation is where a
+# GPU driver, a remote desktop session or endpoint protection interferes.
+# So show a real window, let the event loop run, and close it on a timer.
+_WINDOW_CODE = """
+import numpy as np, napari
+from qtpy.QtWidgets import QApplication
+from qtpy.QtCore import QTimer
+v = napari.Viewer()
+v.add_image(np.zeros((16, 16), dtype='uint8'), name='probe')
+QTimer.singleShot(2500, QApplication.instance().quit)
+napari.run()
+print('window opened and closed cleanly')
+"""
+
+
 def _opengl_probe() -> str:
     """Offscreen GL context, out-of-process, reporting the driver version."""
     return _run_isolated(_GL_CODE)
@@ -198,6 +216,11 @@ def _opengl_probe() -> str:
 
 def _viewer_probe() -> str:
     return _run_isolated(_VIEWER_CODE)
+
+
+def _window_probe() -> str:
+    """Open a real napari window briefly — what the annotator actually does."""
+    return _run_isolated(_WINDOW_CODE)
 
 
 def main(argv: list[str]) -> int:
@@ -261,14 +284,30 @@ def main(argv: list[str]) -> int:
             _line(f"  [warn] this is not the tested version "
                   f"({TESTED_NAPARI_VERSION}) — see the verdict below")
     viewer_ok = False
+    window_ok = False
     if napari_ok:
         viewer_ok, detail = _check("open a viewer", _viewer_probe)
         if not viewer_ok:
             tracebacks["viewer"] = detail
+        if viewer_ok:
+            _line("  ... opening a real window for 3 seconds, please wait")
+            window_ok, detail = _check("show a window", _window_probe)
+            if not window_ok:
+                tracebacks["window"] = detail
     _line()
 
     _line("=" * 64)
-    if viewer_ok:
+    if viewer_ok and not window_ok:
+        _line("  VERDICT: napari builds a viewer, but putting a real window")
+        _line("  on screen fails. The packages are fine — something outside")
+        _line("  them is stopping the window appearing.")
+        _line("  Usual causes, in order:")
+        _line("    1. endpoint protection blocking the window")
+        _line("    2. a remote desktop / virtual display session")
+        _line("    3. the GPU driver refusing an on-screen GL surface —")
+        _line("       try starting the tool with QT_OPENGL=software")
+        _line("  Send the 'window' traceback below.")
+    elif viewer_ok:
         _line("  VERDICT: napari works. The graphics stack is fine.")
         _line("  If the annotation tool still fails, the problem is in the")
         _line("  tool or the batch — send the error from annotate.bat.")
