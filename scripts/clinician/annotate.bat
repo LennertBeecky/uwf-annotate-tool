@@ -100,6 +100,7 @@ if defined ZIP (
         pause & exit /b 1
     )
 
+
     move /Y "!ZIP!" "%PROCESSED%" >nul
     set "BATCH_DIR=clinician_data\images_to_annotate\!BATCH_NAME!"
 ) else (
@@ -175,10 +176,11 @@ if not "!RC!"=="0" (
     if not "!RC!"=="0" (
         echo.
         echo ================================================================
-        echo   Still failing. The full log is at:
+        echo   Still failing. Opening the log in Notepad now - select all
+        echo   ^(Ctrl+A^), copy ^(Ctrl+C^) and send it to Lennert.
         echo     !LOGFILE!
-        echo   Send that file to Lennert.
         echo ================================================================
+        start "" notepad "!LOGFILE!"
     ) else (
         echo.
         echo   The graphics card worked. Tell Lennert - software rendering
