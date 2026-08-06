@@ -37,9 +37,20 @@ def _check(label: str, fn) -> tuple[bool, str]:
 
 
 def _package_version(name: str):
+    """Import a package out-of-process and report its version.
+
+    Out-of-process because these imports load native code. A compiled
+    extension built against the wrong runtime does not raise ImportError,
+    it takes the interpreter down with it — and an in-process import then
+    kills the diagnostic mid-sentence, so the report stops at a section
+    heading and says nothing about why. Isolated, the crash is just a
+    non-zero exit code we can name.
+    """
     def probe():
-        mod = __import__(name)
-        return getattr(mod, "__version__", "(no __version__)")
+        return _run_isolated(
+            f"import {name} as m\n"
+            f"print(getattr(m, '__version__', '(no __version__)'))\n"
+        )
     return probe
 
 
@@ -79,6 +90,60 @@ def _describe_exit_code(code: int) -> str:
     known = _WINDOWS_CRASH_CODES.get(unsigned)
     text = f"code {code} (0x{unsigned:08X})"
     return f"{text}: {known}" if known else text
+
+
+def _dll_version(path) -> str:
+    """Version string of a Windows DLL, or '' if it cannot be read."""
+    import ctypes
+    import ctypes.wintypes as wt
+
+    ver = ctypes.WinDLL("version")
+    size = ver.GetFileVersionInfoSizeW(ctypes.c_wchar_p(str(path)), None)
+    if not size:
+        return ""
+    buf = ctypes.create_string_buffer(size)
+    if not ver.GetFileVersionInfoW(ctypes.c_wchar_p(str(path)), 0, size, buf):
+        return ""
+    block = ctypes.c_void_p()
+    length = wt.UINT()
+    if not ver.VerQueryValueW(buf, ctypes.c_wchar_p("\\"),
+                              ctypes.byref(block), ctypes.byref(length)):
+        return ""
+
+    class FixedFileInfo(ctypes.Structure):
+        _fields_ = [("dwSignature", wt.DWORD), ("dwStrucVersion", wt.DWORD),
+                    ("dwFileVersionMS", wt.DWORD), ("dwFileVersionLS", wt.DWORD)]
+
+    info = ctypes.cast(block, ctypes.POINTER(FixedFileInfo)).contents
+    return "%d.%d.%d.%d" % (info.dwFileVersionMS >> 16,
+                            info.dwFileVersionMS & 0xFFFF,
+                            info.dwFileVersionLS >> 16,
+                            info.dwFileVersionLS & 0xFFFF)
+
+
+# Shipped by the Visual C++ Redistributable. Every compiled Python
+# extension on Windows — numpy, Qt, the lot — links against these, so an
+# out-of-date copy is a fault that spans unrelated packages.
+VCRUNTIME_DLLS = ("VCRUNTIME140.dll", "VCRUNTIME140_1.dll", "MSVCP140.dll")
+
+
+def _vcruntime_report() -> list[str]:
+    """One line per Visual C++ runtime DLL: version, or that it is missing."""
+    import pathlib
+
+    system32 = pathlib.Path(os.environ.get("SystemRoot", r"C:\Windows")) / "System32"
+    lines = []
+    for name in VCRUNTIME_DLLS:
+        path = system32 / name
+        if not path.exists():
+            lines.append(f"  [FAIL] {name}: MISSING")
+            continue
+        try:
+            version = _dll_version(path) or "(version unreadable)"
+        except Exception as exc:
+            version = f"(version unreadable: {type(exc).__name__})"
+        lines.append(f"  [ok]   {name}: {version}")
+    return lines
 
 
 def _run_isolated(code: str) -> str:
@@ -150,6 +215,12 @@ def main(argv: list[str]) -> int:
         if os.environ.get(var):
             _line(f"  {var}={os.environ[var]}")
     _line()
+
+    if sys.platform == "win32":
+        _line("Visual C++ runtime")
+        for entry in _vcruntime_report():
+            _line(entry)
+        _line()
 
     _line("Scientific stack")
     stack_ok = True
