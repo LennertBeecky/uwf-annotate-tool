@@ -36,6 +36,20 @@ fi
 CONDA_BASE="$(conda info --base)"
 echo "  conda found at: $CONDA_BASE"
 
+# 1b. git check — present on macOS only once the Xcode command line tools
+# are installed. `git --version` triggers Apple's installer prompt if not.
+if ! command -v git > /dev/null 2>&1; then
+    echo "ERROR: git was not found."
+    echo ""
+    echo "The setup script needs git to download and update the tool."
+    echo "Run this in Terminal, accept the install prompt, then re-run"
+    echo "this script:"
+    echo "    xcode-select --install"
+    echo ""
+    read -p "Press Enter to close..."
+    exit 1
+fi
+
 # 2. Repo: clone or pull
 if [ -d "$INSTALL_DIR/.git" ]; then
     echo "  Updating existing install at $INSTALL_DIR ..."

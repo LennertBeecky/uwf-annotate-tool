@@ -65,6 +65,22 @@ if not errorlevel 1 (
     call "!CONDA_ACTIVATE!"
 )
 
+REM 1b. git check. Miniconda does not ship git, so on a fresh PC the clone
+REM below would fail and the conda step would then die on a missing yml —
+REM a confusing chain. Fail here instead, with a link.
+where git >nul 2>nul
+if errorlevel 1 (
+    echo ERROR: git was not found.
+    echo.
+    echo The setup script needs git to download and update the tool.
+    echo Install "Git for Windows" from:
+    echo   https://git-scm.com/download/win
+    echo Accept all the default options, then double-click this script again.
+    echo.
+    pause
+    exit /b 1
+)
+
 REM 2. Repo: clone or pull
 if exist "%INSTALL_DIR%\.git" (
     echo   Updating existing install at %INSTALL_DIR% ...
