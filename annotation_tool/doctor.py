@@ -5,8 +5,10 @@ interpreter, scientific stack, Qt binding, OpenGL, napari itself — and
 prints a verdict with the fix to try. Every check is wrapped, so the
 report is complete even when something explodes half way.
 
-    python annotation_tool/doctor.py                 # print the report
-    python annotation_tool/doctor.py report.txt      # also write it to a file
+    python annotation_tool/doctor.py                 # writes
+                                                     # uwf_annotate_diagnostic.txt
+                                                     # into the current folder
+    python annotation_tool/doctor.py somewhere.txt   # or a path you choose
 """
 
 from __future__ import annotations
@@ -176,53 +178,58 @@ def main(argv: list[str]) -> int:
     return 0 if viewer_ok else 1
 
 
-def resolve_report_path(requested: str) -> "Path":
-    """Somewhere the report can actually be written, and be found again.
+DEFAULT_REPORT_NAME = "uwf_annotate_diagnostic.txt"
 
-    `%USERPROFILE%\\Desktop` often does not exist on Windows: OneDrive
-    redirects the Desktop to `%USERPROFILE%\\OneDrive\\Desktop`, so writing
-    there fails and the annotator is told to look for a file that was never
-    created. Fall back through the plausible locations, and never fail —
-    a report in the wrong folder beats no report.
+
+def resolve_report_path(requested: str | None) -> "Path":
+    """Where to write the report. Defaults to the current folder.
+
+    Do not try to be clever about the Desktop: on Windows OneDrive
+    redirects it, so `%USERPROFILE%\\Desktop` frequently does not exist and
+    the report vanishes. The folder the script was run from always exists
+    and the annotator is already looking at it.
     """
     from pathlib import Path
 
+    if requested is None:
+        return Path.cwd() / DEFAULT_REPORT_NAME
     p = Path(requested).expanduser()
+    if p.is_dir():
+        return p / DEFAULT_REPORT_NAME
     if p.parent.exists():
         return p
-    home = Path.home()
-    for alt in (home / "OneDrive" / "Desktop", home / "Desktop", home):
-        if alt.is_dir():
-            return alt / p.name
     return Path.cwd() / p.name
 
 
 if __name__ == "__main__":
-    out_path = sys.argv[1] if len(sys.argv) > 1 else None
-    if out_path:
-        out_path = str(resolve_report_path(out_path))
-        import io
+    # Always write a report. Requiring an argument to get a file is how the
+    # report went missing in the first place.
+    import io
 
-        buf = io.StringIO()
-        real = sys.stdout
-        sys.stdout = _Tee = type("Tee", (), {
-            "write": lambda _s, t: (real.write(t), buf.write(t)) and None,
-            "flush": lambda _s: real.flush(),
-        })()
-        code = main(sys.argv)
-        sys.stdout = real
-        try:
-            with open(out_path, "w", encoding="utf-8") as fh:
-                fh.write(buf.getvalue())
-            print("\n" + "=" * 64)
-            print("  REPORT WRITTEN TO:")
-            print(f"    {out_path}")
-            print("  Send that file back. If you cannot find it, copy the")
-            print("  VERDICT block above instead.")
-            print("=" * 64)
-        except Exception as exc:
-            print(f"\nCould not write the report ({exc}).")
-            print("Copy the VERDICT block above instead.")
+    out_path = resolve_report_path(sys.argv[1] if len(sys.argv) > 1 else None)
+
+    buf = io.StringIO()
+    real = sys.stdout
+    sys.stdout = type("Tee", (), {
+        "write": lambda _s, t: (real.write(t), buf.write(t)) and None,
+        "flush": lambda _s: real.flush(),
+    })()
+    code = main(sys.argv)
+    sys.stdout = real
+
+    try:
+        out_path.write_text(buf.getvalue(), encoding="utf-8")
+        written = str(out_path.resolve())
+    except Exception as exc:
+        written = None
+        print(f"\nCould not write the report ({exc}).")
+
+    print("\n" + "=" * 64)
+    if written:
+        print("  REPORT WRITTEN TO:")
+        print(f"    {written}")
+        print("  Send that file back — or just copy the VERDICT block above.")
     else:
-        code = main(sys.argv)
+        print("  Copy the VERDICT block above and send that.")
+    print("=" * 64)
     sys.exit(code)

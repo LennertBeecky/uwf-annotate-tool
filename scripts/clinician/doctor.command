@@ -4,8 +4,7 @@
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 INSTALL_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
-REPORT="$HOME/Desktop/uwf_annotate_diagnostic.txt"
-[ -d "$HOME/OneDrive/Desktop" ] && REPORT="$HOME/OneDrive/Desktop/uwf_annotate_diagnostic.txt"
+REPORT="$INSTALL_DIR/uwf_annotate_diagnostic.txt"
 cd "$INSTALL_DIR"
 
 echo "================================================================"
