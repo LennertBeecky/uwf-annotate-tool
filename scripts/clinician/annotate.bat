@@ -87,67 +87,20 @@ if defined ZIP (
     REM Extract the zip
     for %%n in ("!ZIP!") do set "BATCH_NAME=%%~nn"
     echo Extracting batch: !BATCH_NAME!
-    if not exist "clinician_data\images_to_annotate\!BATCH_NAME!" mkdir "clinician_data\images_to_annotate\!BATCH_NAME!"
-    if not exist "clinician_data\predictions\!BATCH_NAME!" mkdir "clinician_data\predictions\!BATCH_NAME!"
 
-    set "TMPDIR=%TEMP%\uwf_extract_!BATCH_NAME!"
-    if exist "!TMPDIR!" rmdir /s /q "!TMPDIR!"
-    mkdir "!TMPDIR!"
-    powershell -Command "Expand-Archive -Path '!ZIP!' -DestinationPath '!TMPDIR!' -Force"
-
-    REM Find images\ at the top level OR one folder down. A zip that has
-    REM been downloaded and re-compressed on the way (browsers auto-extract,
-    REM cloud sync sometimes repacks) gains a wrapper folder. The old
-    REM top-level-only test copied nothing, said nothing, and still moved
-    REM the zip to processed\ - leaving empty batch folders and no clue why.
-    REM annotate.command has searched two levels since fa39c76; this is the
-    REM same fix for Windows.
-    set "SRC_IMG="
-    if exist "!TMPDIR!\images" set "SRC_IMG=!TMPDIR!\images"
-    if not defined SRC_IMG (
-        for /d %%d in ("!TMPDIR!\*") do (
-            if not defined SRC_IMG if exist "%%d\images" set "SRC_IMG=%%d\images"
-        )
-    )
-
-    if not defined SRC_IMG (
+    REM Extraction is done by annotation_tool\extract_batch.py, not here:
+    REM the shell versions drifted apart and the cmd one silently copied
+    REM nothing when a zip arrived with a wrapper folder. The Python one is
+    REM covered by tests/test_extract_batch.py.
+    conda run --no-capture-output -n %ENV_NAME% python annotation_tool\extract_batch.py "!ZIP!" "%INSTALL_DIR%"
+    if errorlevel 1 (
         echo.
-        echo ERROR: no "images" folder was found inside the zip.
-        echo.
-        echo The zip contains:
-        dir /b /s "!TMPDIR!"
-        echo.
-        echo The zip is still in %INCOMING% - nothing was lost. Send the
-        echo listing above to Lennert.
+        echo The batch could not be unpacked - see the message above.
+        echo The zip is still in %INCOMING%, nothing was lost.
         pause & exit /b 1
     )
 
-    for %%p in ("!SRC_IMG!\..") do set "SRC_PARENT=%%~fp"
-    xcopy /Y /Q "!SRC_IMG!\*" "clinician_data\images_to_annotate\!BATCH_NAME!\" >nul
-    if exist "!SRC_PARENT!\predictions" (
-        xcopy /Y /Q "!SRC_PARENT!\predictions\*" "clinician_data\predictions\!BATCH_NAME!\" >nul
-    )
-
-    REM Confirm something actually landed before declaring the zip processed.
-    set "N_IMG_COPIED=0"
-    for %%f in ("clinician_data\images_to_annotate\!BATCH_NAME!\*") do set /a N_IMG_COPIED+=1
-    if !N_IMG_COPIED! EQU 0 (
-        echo.
-        echo ERROR: found "!SRC_IMG!" but copied no images out of it.
-        echo The zip is still in %INCOMING% - nothing was lost.
-        pause & exit /b 1
-    )
-    echo   Extracted !N_IMG_COPIED! images.
-    set "N_PRED_COPIED=0"
-    for %%f in ("clinician_data\predictions\!BATCH_NAME!\*") do set /a N_PRED_COPIED+=1
-    if !N_PRED_COPIED! EQU 0 (
-        echo   WARNING: no prefill found - the vessels will start empty.
-    ) else (
-        echo   Extracted !N_PRED_COPIED! prefill files.
-    )
-
-    move /Y "!ZIP!" "%PROCESSED%\" >nul
-    rmdir /s /q "!TMPDIR!"
+    move /Y "!ZIP!" "%PROCESSED%" >nul
     set "BATCH_DIR=clinician_data\images_to_annotate\!BATCH_NAME!"
 ) else (
     REM No new zip — pick latest in-progress batch

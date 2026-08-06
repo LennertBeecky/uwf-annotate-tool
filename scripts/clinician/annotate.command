@@ -92,35 +92,17 @@ else
     BATCH_NAME=$(basename "$ZIP" .zip)
     echo "Extracting batch: $BATCH_NAME"
 
-    mkdir -p "clinician_data/images_to_annotate/$BATCH_NAME"
-    mkdir -p "clinician_data/predictions/$BATCH_NAME"
-
-    TMPDIR=$(mktemp -d)
-    unzip -q "$ZIP" -d "$TMPDIR"
-
-    # Find the actual images/ and predictions/ dirs. Two layouts in the wild:
-    #   1. bundled flat:  TMPDIR/images/, TMPDIR/predictions/
-    #   2. wrapper folder: TMPDIR/<batchname>/images/, TMPDIR/<batchname>/predictions/
-    # Layout 2 happens when Mac users re-zip an auto-extracted folder via
-    # right-click → Compress (Safari unzips on download by default). We
-    # search up to 2 levels deep for the first images/ dir; predictions/
-    # is taken from the same parent.
-    SRC_IMG=$(find "$TMPDIR" -maxdepth 2 -type d -name images 2>/dev/null | head -n 1)
-    if [ -n "$SRC_IMG" ]; then
-        mv "$SRC_IMG/"* "clinician_data/images_to_annotate/$BATCH_NAME/" 2>/dev/null || true
-        SRC_PRED="$(dirname "$SRC_IMG")/predictions"
-        if [ -d "$SRC_PRED" ]; then
-            mv "$SRC_PRED/"* "clinician_data/predictions/$BATCH_NAME/" 2>/dev/null || true
-        fi
-    else
-        echo "WARNING: extracted zip has no images/ folder. Contents:"
-        ls -la "$TMPDIR"
+    # Extraction lives in annotation_tool/extract_batch.py so Mac and
+    # Windows cannot drift apart again, and so it can be tested.
+    if ! python annotation_tool/extract_batch.py "$ZIP" "$INSTALL_DIR"; then
+        echo ""
+        echo "The batch could not be unpacked - see the message above."
+        echo "The zip is still in $INCOMING, nothing was lost."
+        read -p "Press Enter to close..."
+        exit 1
     fi
 
-    # Move zip to processed/ so we don't re-extract on next launch.
     mv "$ZIP" "$PROCESSED/"
-    rm -rf "$TMPDIR"
-
     BATCH_DIR="clinician_data/images_to_annotate/$BATCH_NAME"
 fi
 
