@@ -140,14 +140,19 @@ REM graphics problem, and it dies without leaving anything on screen once
 REM the window closes - so keep a file we can actually read afterwards.
 set "LOGFILE=%INSTALL_DIR%\last_session_log.txt"
 
-REM Software rendering FIRST on Windows. napari draws through OpenGL, and
-REM remote desktop sessions and stock display drivers frequently provide no
-REM usable GL context - the failure mode is the window never appearing. DVA
-REM frames are 720x720, so software rasterising costs nothing noticeable.
-REM If it fails we retry on the GPU below, which is the faster path for
-REM large UWF images.
-set "QT_OPENGL=software"
-set "LIBGL_ALWAYS_SOFTWARE=1"
+REM The graphics card FIRST, software rendering only as a fallback.
+REM
+REM This used to be the other way round, on the assumption that a stock
+REM Windows display driver would not give napari a usable GL context. On
+REM the machine that assumption was made for, the diagnostic reports a
+REM healthy OpenGL 4.6 and opens a viewer fine - while forcing
+REM QT_OPENGL=software made the launch hang with no window and no error.
+REM
+REM The fallback below cannot rescue that, either: it triggers on a
+REM non-zero exit code, and a hang never produces one. So lead with the
+REM configuration the diagnostic actually proves works on this machine.
+set "QT_OPENGL="
+set "LIBGL_ALWAYS_SOFTWARE="
 
 conda run --no-capture-output -n %ENV_NAME% python annotation_tool\annotate.py ^
     "!BATCH_DIR!" ^
@@ -161,11 +166,11 @@ if not "!RC!"=="0" (
     echo.
     echo ================================================================
     echo   That attempt failed ^(exit code !RC!^).
-    echo   Retrying with the graphics card instead of software rendering.
+    echo   Retrying with software rendering instead of the graphics card.
     echo ================================================================
     echo.
-    set "QT_OPENGL="
-    set "LIBGL_ALWAYS_SOFTWARE="
+    set "QT_OPENGL=software"
+    set "LIBGL_ALWAYS_SOFTWARE=1"
     conda run --no-capture-output -n %ENV_NAME% python annotation_tool\annotate.py ^
         "!BATCH_DIR!" ^
         --output-dir "!ANNOTATIONS_DIR!" ^
@@ -183,8 +188,8 @@ if not "!RC!"=="0" (
         start "" notepad "!LOGFILE!"
     ) else (
         echo.
-        echo   The graphics card worked. Tell Lennert - software rendering
-        echo   can be turned off for this PC.
+        echo   Software rendering worked. Tell Lennert - this PC needs
+        echo   QT_OPENGL=software set permanently.
     )
 )
 
