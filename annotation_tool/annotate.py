@@ -105,6 +105,22 @@ LUNET_CACHE_DIRNAME = "_lunet_cache"
 DEFAULT_LUNET_MODEL = Path("models/lunetv2Large.onnx")
 
 
+def ask_confirm(viewer, question: str) -> bool:
+    """Modal yes/no dialog inside the napari session; the default button
+    is No so a stray Enter cannot confirm. Without QtWidgets (headless or
+    scripted runs) it answers Yes, which is the pre-dialog behaviour."""
+    try:
+        from qtpy.QtWidgets import QMessageBox
+    except Exception:
+        return True
+    parent = getattr(getattr(viewer, "window", None), "_qt_window", None)
+    answer = QMessageBox.question(
+        parent, "Confirm", question,
+        QMessageBox.Yes | QMessageBox.No, QMessageBox.No,
+    )
+    return answer == QMessageBox.Yes
+
+
 # ---- napari session ---------------------------------------------------
 
 
@@ -388,11 +404,18 @@ def _open_annotation_session(
 
     @viewer.bind_key("q", overwrite=True)
     def _save_quit(_viewer):
+        if not ask_confirm(viewer, f"Save annotations for {image_path.name}?"):
+            print("  [q] save cancelled — session continues")
+            return
         state["should_save"] = True
         viewer.close()
 
     @viewer.bind_key("s", overwrite=True)
     def _skip(_viewer):
+        if not ask_confirm(
+                viewer, f"Skip {image_path.name} without saving?"):
+            print("  [s] skip cancelled — session continues")
+            return
         state["should_save"] = False
         print("  [s] skipping without saving")
         viewer.close()
